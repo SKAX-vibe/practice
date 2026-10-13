@@ -8,8 +8,9 @@
   같은 사번의 내용이 파일마다 다르면 '명단 중복 불일치'로 확인 필요.
 - 기한: 신규 입사자 판별에 일반화 규칙을 쓰지 않는다. 원본·정답에 명시된 사번만 판별한다.
   - 기존 직원 = 원본 명단(data/직원명단.csv)의 사번: 과정 기한 (answers/함정_정답.md "명단 12명 ... 기한 2026-06-10")
-  - 신규 입사자 예외 = NEW_HIRE_IDS(E013, E014): 입사일 + N일, N은 교육과정.csv 의 '신규 입사자 기한'
-    (answers/함정_정답.md "E013 ... E014는 기한이 입사 후 30일")
+  - 신규 입사자 예외 = data/신규입사자예외.csv 의 사번(근거가 적힌 행만): 입사일 + N일,
+    N은 교육과정.csv 의 '신규 입사자 기한'. 근거가 빈 행은 예외로 인정하지 않고 '확인 필요'(예외 근거 누락).
+    예외 사번 추가는 담당자가 이 파일에 한다. 스크립트는 수정하지 않는다.
   - 그 외 사번, 또는 예외 사번의 입사일·N을 읽을 수 없으면 신규 입사자 여부 확인 불가 → '확인 필요'
 - 수료 기록이 있으면 이수. 수료일이 기한보다 늦으면 이수로 세고 '기한 후 수료'로 확인 필요.
 - 수료 기록이 없으면 미이수. 기한이 기준일 전이면 '지연', 아니면 '기한 전', 기한 판별 불가면 '확인 필요'.
@@ -31,13 +32,14 @@ DRAFT_DIR = os.path.join(ROOT, "outbox", "drafts")
 LATE, NOT_YET, UNSURE = "지연", "기한 전", "확인 필요"
 BASIS_COURSE, BASIS_NEW = "과정 기한", "신규 입사자 예외"
 BASE_ROSTER = "직원명단.csv"  # 기존 직원 명단(원본 12명)
-NEW_HIRE_IDS = {"E013", "E014"}  # answers/함정_정답.md 에 명시된 신규 입사자. CLAUDE.md 와 같아야 한다.
+NEW_HIRE_FILE = "신규입사자예외.csv"  # 사번,근거. Skill 과 같은 파일을 참조한다.
 ALL_DEPTS = "전체"
 NOTE_UNKNOWN_ID = "명단에 없는 사번"
 NOTE_LATE_DONE = "기한 후 수료"
 NOTE_NEW_HIRE = "신규 입사자 여부 확인 불가"
 NOTE_COURSE = "과정명 불일치"
 NOTE_DUP = "명단 중복 불일치"
+NOTE_NO_BASIS = "예외 근거 누락"
 SECTIONS = [("1", "부서별 이수율"), ("2", "미이수자 목록"), ("3", "확인 필요 항목")]
 
 
@@ -64,6 +66,12 @@ def base_date():
 def load():
     notes = set()
     base_ids = {r["사번"] for r in read_csv(BASE_ROSTER)}
+    new_hire_ids = set()
+    for r in read_csv(NEW_HIRE_FILE):
+        if r.get("근거"):
+            new_hire_ids.add(r["사번"])
+        else:
+            notes.add((NOTE_NO_BASIS, r["사번"], "-"))
     roster = {}
     for r in read_csv("직원명단*.csv"):
         if r["사번"] in roster and roster[r["사번"]] != r:
@@ -83,12 +91,12 @@ def load():
             notes.add((NOTE_COURSE, r["사번"], r["과정"]))
         else:
             done[(r["사번"], r["과정"])] = date.fromisoformat(r["수료일"])
-    return roster, courses, done, notes, base_ids
+    return roster, courses, done, notes, base_ids, new_hire_ids
 
 
-def deadline(emp_id, emp, course, base_ids):
+def deadline(emp_id, emp, course, base_ids, new_hire_ids):
     """(기한 또는 None, 기한 기준). None 이면 신규 입사자 여부를 확인할 수 없다."""
-    if emp_id in NEW_HIRE_IDS:
+    if emp_id in new_hire_ids:
         hired = parse_date(emp.get("입사일", ""))
         if hired is None or course["신규일수"] is None:
             return None, UNSURE
@@ -98,7 +106,7 @@ def deadline(emp_id, emp, course, base_ids):
     return None, UNSURE
 
 
-def analyze(roster, courses, done, notes, base_ids, today):
+def analyze(roster, courses, done, notes, base_ids, new_hire_ids, today):
     depts = list(dict.fromkeys(e["부서"] for e in roster.values()))
     stats = {}
     missing = []
@@ -106,7 +114,7 @@ def analyze(roster, courses, done, notes, base_ids, today):
         for dept in depts + [ALL_DEPTS]:
             stats[(c["과정"], dept)] = {"대상": 0, "이수": 0, "미이수": 0, LATE: 0, NOT_YET: 0, UNSURE: 0, "기한 후": 0}
         for emp_id, emp in sorted(roster.items()):
-            due, basis = deadline(emp_id, emp, c, base_ids)
+            due, basis = deadline(emp_id, emp, c, base_ids, new_hire_ids)
             if due is None:
                 notes.add((NOTE_NEW_HIRE, emp_id, c["과정"]))
             buckets = [stats[(c["과정"], emp["부서"])], stats[(c["과정"], ALL_DEPTS)]]
@@ -232,15 +240,15 @@ def main():
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8")
     today = base_date()
-    roster, courses, done, notes, base_ids = load()
-    depts, stats, missing = analyze(roster, courses, done, notes, base_ids, today)
+    roster, courses, done, notes, base_ids, new_hire_ids = load()
+    depts, stats, missing = analyze(roster, courses, done, notes, base_ids, new_hire_ids, today)
 
     print(f"기준일 {today} / 명단 {len(roster)}명 / 부서 {len(depts)}개 / 과정 {len(courses)}개")
     for c in courses:
         s = stats[(c["과정"], ALL_DEPTS)]
         print(f"  {c['과정']}: 이수 {s['이수']} · 미이수 {s['미이수']} "
               f"(지연 {s[LATE]}, 기한 전 {s[NOT_YET]}, 확인 필요 {s[UNSURE]}) · 기한 후 수료 {s['기한 후']}")
-    new_hires = sorted({e for e, emp in roster.items() for c in courses if deadline(e, emp, c, base_ids)[1] == BASIS_NEW})
+    new_hires = sorted({e for e, emp in roster.items() for c in courses if deadline(e, emp, c, base_ids, new_hire_ids)[1] == BASIS_NEW})
     print(f"  신규 입사자 예외 적용: {new_hires or '없음'}")
     print(f"  확인 필요: {sorted(notes) or '없음'}")
     print()
