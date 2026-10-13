@@ -3,9 +3,11 @@
 사용법: python scripts/verify.py
 원본, 보고서, 초안은 읽기만 한다. 모두 일치하면 종료 코드 0, 불일치가 있으면 1.
 - 명단은 data/직원명단*.csv 를 모두 읽어 사번 기준으로 합친다(L11 직원명단_신규.csv 대응).
-- 개인 기한 = max(과정 기한, 입사일 + 신규 입사자 기한 일수).
-- 수료 기록이 있으면 이수. 수료일이 개인 기한보다 늦으면 '기한 후 수료'로 따로 센다.
-- 수료 기록이 없으면 미이수. 개인 기한이 기준일 전이면 '지연', 아니면 '기한 전'.
+- 기한은 과정 기한을 쓴다. 신규 입사자 기한(입사일로부터 N일)의 적용 방식은 아직 정해지지 않았다.
+  입사일 + N일이 과정 기한보다 늦은 직원(신규 입사자 후보)은 두 기한으로 각각 판정해 보고,
+  결과가 같으면 그 판정을, 다르면 '확인 필요'를 기대한다(기한 칸도 '확인 필요').
+- 수료 기록이 있으면 이수. 수료일이 기한보다 늦으면 '기한 후 수료'로 따로 센다.
+- 수료 기록이 없으면 미이수. 기한이 기준일 전이면 '지연', 아니면 '기한 전'.
 - 명단에 없는 사번의 수료 기록은 집계에서 빼고 '확인 필요'로 둔다.
 - 독려 초안은 지연 인원에게만 쓴다(사번마다 outbox/drafts/독려_<사번>.md).
 """
@@ -23,6 +25,9 @@ DRAFT_DIR = os.path.join(ROOT, "outbox", "drafts")
 
 LATE = "지연"
 NOT_YET = "기한 전"
+UNSURE = "확인 필요"
+REASON_UNKNOWN = "명단에 없는 사번"
+REASON_HIRE = "신규 입사자 기한 미확정"
 
 
 def read_csv(pattern):
@@ -56,25 +61,34 @@ def load():
 
 
 def analyze(roster, courses, done, today):
-    stats, missing, late_done = [], [], []
+    stats, missing, late_done, unsure_late = [], [], [], []
     for c in courses:
         s = {"과정": c["과정"], "대상": len(roster), "이수": 0, "미이수": 0, LATE: 0, "기한 후": 0}
         for emp_id, emp in sorted(roster.items()):
-            due = max(c["기한"], date.fromisoformat(emp["입사일"]) + timedelta(days=c["신규일수"]))
+            hire_due = date.fromisoformat(emp["입사일"]) + timedelta(days=c["신규일수"])
+            # 신규 입사자 후보만 두 기한을 모두 적용해 본다. 나머지는 과정 기한만.
+            dues = {c["기한"], hire_due} if hire_due > c["기한"] else {c["기한"]}
             finished = done.get((emp_id, c["과정"]))
             if finished:
                 s["이수"] += 1
-                if finished > due:
+                late = {finished > d for d in dues}
+                if late == {True}:
                     s["기한 후"] += 1
                     late_done.append((c["과정"], emp_id, finished.strftime("%m-%d")))
+                elif len(late) > 1:
+                    unsure_late.append((c["과정"], emp_id))
             else:
                 s["미이수"] += 1
-                status = LATE if due < today else NOT_YET
+                statuses = {LATE if d < today else NOT_YET for d in dues}
+                if len(statuses) == 1:
+                    status, due_cell = statuses.pop(), c["기한"].strftime("%m-%d")
+                else:
+                    status = due_cell = UNSURE
                 if status == LATE:
                     s[LATE] += 1
-                missing.append((c["과정"], emp_id, due.strftime("%m-%d"), status))
+                missing.append((c["과정"], emp_id, due_cell, status))
         stats.append(s)
-    return stats, missing, late_done
+    return stats, missing, late_done, unsure_late
 
 
 def read_tables(text):
@@ -116,7 +130,7 @@ class Checker:
         return ok
 
 
-def check_report(ck, stats, missing, late_done, unknown):
+def check_report(ck, stats, missing, late_done, unsure_late, unknown):
     if not ck.check("보고서 존재", os.path.exists(REPORT), True):
         return
     with open(REPORT, encoding="utf-8") as f:
@@ -142,11 +156,14 @@ def check_report(ck, stats, missing, late_done, unknown):
                      (to_int(row[3]) or 0) + (to_int(row[4]) or 0), s["대상"])
 
     actual = sorted((r[0], r[1], r[4], r[5]) for r in tables.get("3", []) if len(r) >= 6)
-    ck.check("3장 미이수자(과정, 사번, 개인 기한, 상태)", actual, sorted(missing))
+    ck.check("3장 미이수자(과정, 사번, 기한, 상태)", actual, sorted(missing))
     actual = sorted((r[0], r[1], r[4]) for r in tables.get("4", []) if len(r) >= 5)
     ck.check("4장 기한 후 수료(과정, 사번, 수료일)", actual, sorted(late_done))
-    actual = sorted((r[0], r[1]) for r in tables.get("5", []) if len(r) >= 4)
-    ck.check("5장 명단에 없는 사번(사번, 과정)", actual, unknown)
+    rows5 = [r for r in tables.get("5", []) if len(r) >= 4]
+    actual = sorted((r[0], r[1]) for r in rows5 if r[3] == REASON_UNKNOWN)
+    ck.check(f"5장 {REASON_UNKNOWN}(사번, 과정)", actual, unknown)
+    actual = sorted((r[1], r[0]) for r in rows5 if r[3] == REASON_HIRE)
+    ck.check(f"5장 {REASON_HIRE}로 기한 후 수료 판정 보류(과정, 사번)", actual, sorted(unsure_late))
 
     late = [m for m in missing if m[3] == LATE]
     ck.check("요약 미이수 연인원/실인원",
@@ -163,7 +180,7 @@ def check_drafts(ck, missing, roster):
             late.setdefault(emp_id, []).append(course)
     files = sorted(re.match(r"독려_(.+)\.md$", os.path.basename(p)).group(1)
                    for p in glob.glob(os.path.join(DRAFT_DIR, "독려_*.md")))
-    ck.check("독려 초안 대상 = 지연 인원(기한 전·명단 외 제외)", files, sorted(late))
+    ck.check("독려 초안 대상 = 지연 인원(기한 전·확인 필요·명단 외 제외)", files, sorted(late))
     for emp_id in sorted(late):
         path = os.path.join(DRAFT_DIR, f"독려_{emp_id}.md")
         if not os.path.exists(path):
@@ -181,16 +198,18 @@ def main():
         sys.stdout.reconfigure(encoding="utf-8")
     today = base_date()
     roster, courses, done, unknown = load()
-    stats, missing, late_done = analyze(roster, courses, done, today)
+    stats, missing, late_done, unsure_late = analyze(roster, courses, done, today)
 
     print(f"기준일 {today} / 명단 {len(roster)}명 / 과정 {len(courses)}개")
     for s in stats:
         print(f"  {s['과정']}: 이수 {s['이수']} · 미이수 {s['미이수']} (지연 {s[LATE]}) · 기한 후 수료 {s['기한 후']}")
     print(f"  명단에 없는 사번: {unknown or '없음'}")
+    unsure = sorted({m[1] for m in missing if m[3] == UNSURE} | {u[1] for u in unsure_late})
+    print(f"  신규 입사자 기한 미확정으로 '{UNSURE}': {unsure or '없음'}")
     print()
 
     ck = Checker()
-    check_report(ck, stats, missing, late_done, unknown)
+    check_report(ck, stats, missing, late_done, unsure_late, unknown)
     check_drafts(ck, missing, roster)
 
     print()
