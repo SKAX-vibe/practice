@@ -1,0 +1,35 @@
+name: Verify tracks
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: ${{ matrix.track }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false   # 한 트랙이 실패해도 나머지 트랙 결과를 모두 확인
+      matrix:
+        track: [sales-quote, hr-training, fin-invoice, ops-quality]
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.14"
+
+      # verify.py는 표준 라이브러리만 사용하고, 경로를 스크립트 위치 기준으로 잡는다.
+      - name: Run scripts/verify.py
+        shell: bash   # pipefail: tee를 거쳐도 verify.py의 종료 코드로 성공/실패 판정
+        run: python "${{ matrix.track }}/scripts/verify.py" 2>&1 | tee verify.log
+
+      - name: Summary
+        if: always()
+        shell: bash
+        run: |
+          result=$(grep -E '^결과:' verify.log 2>/dev/null | tail -1)
+          echo "**${{ matrix.track }}** — ${result:-결과 없음 (실행 오류, 로그 확인)}" >> "$GITHUB_STEP_SUMMARY"
