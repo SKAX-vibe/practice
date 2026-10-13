@@ -2,13 +2,17 @@
 
 사용법: python scripts/verify.py
 원본, 보고서, 초안은 읽기만 한다. 모두 일치하면 종료 코드 0, 불일치가 있으면 1.
+
+공식 형식(교육자료 L03 · 부록 B 트랙 B): 부서별 이수율 표 → 미이수자 목록 순서.
 - 명단은 data/직원명단*.csv 를 모두 읽어 사번 기준으로 합친다(L11 직원명단_신규.csv 대응).
-- 기한은 과정 기한을 쓴다. 신규 입사자 기한(입사일로부터 N일)의 적용 방식은 아직 정해지지 않았다.
-  입사일 + N일이 과정 기한보다 늦은 직원(신규 입사자 후보)은 두 기한으로 각각 판정해 보고,
-  결과가 같으면 그 판정을, 다르면 '확인 필요'를 기대한다(기한 칸도 '확인 필요').
-- 수료 기록이 있으면 이수. 수료일이 기한보다 늦으면 '기한 후 수료'로 따로 센다.
-- 수료 기록이 없으면 미이수. 기한이 기준일 전이면 '지연', 아니면 '기한 전'.
-- 명단에 없는 사번의 수료 기록은 집계에서 빼고 '확인 필요'로 둔다.
+  같은 사번의 내용이 파일마다 다르면 '명단 중복 불일치'로 확인 필요.
+- 기한
+  - 신규 입사자(입사일 + N일 > 과정 기한, N은 교육과정.csv 의 '신규 입사자 기한'): 입사일 + N일
+  - 그 외: 과정 기한
+  - 입사일이 날짜가 아니거나 기준일 이후이면 판별하지 않고 '확인 필요'(신규 입사자 판별 불명확)
+- 수료 기록이 있으면 이수. 수료일이 기한보다 늦으면 이수로 세고 '기한 후 수료'로 확인 필요.
+- 수료 기록이 없으면 미이수. 기한이 기준일 전이면 '지연', 아니면 '기한 전', 기한 판별 불가면 '확인 필요'.
+- 명단에 없는 사번, 교육과정.csv 에 없는 과정명의 수료 기록은 집계에서 빼고 '확인 필요'.
 - 독려 초안은 지연 인원에게만 쓴다(사번마다 outbox/drafts/독려_<사번>.md).
 """
 import csv
@@ -23,19 +27,30 @@ DATA = os.path.join(ROOT, "data")
 REPORT = os.path.join(ROOT, "report", "교육이수.md")
 DRAFT_DIR = os.path.join(ROOT, "outbox", "drafts")
 
-LATE = "지연"
-NOT_YET = "기한 전"
-UNSURE = "확인 필요"
-REASON_UNKNOWN = "명단에 없는 사번"
-REASON_HIRE = "신규 입사자 기한 미확정"
+LATE, NOT_YET, UNSURE = "지연", "기한 전", "확인 필요"
+BASIS_COURSE, BASIS_NEW = "과정 기한", "신규 입사자"
+ALL_DEPTS = "전체"
+NOTE_UNKNOWN_ID = "명단에 없는 사번"
+NOTE_LATE_DONE = "기한 후 수료"
+NOTE_NEW_HIRE = "신규 입사자 판별 불명확"
+NOTE_COURSE = "과정명 불일치"
+NOTE_DUP = "명단 중복 불일치"
+SECTIONS = [("1", "부서별 이수율"), ("2", "미이수자 목록"), ("3", "확인 필요 항목")]
 
 
 def read_csv(pattern):
     rows = []
     for path in sorted(glob.glob(os.path.join(DATA, pattern))):
         with open(path, encoding="utf-8-sig", newline="") as f:
-            rows.extend({k.strip(): v.strip() for k, v in r.items()} for r in csv.DictReader(f))
+            rows.extend({k.strip(): (v or "").strip() for k, v in r.items()} for r in csv.DictReader(f))
     return rows
+
+
+def parse_date(value):
+    try:
+        return date.fromisoformat(value)
+    except ValueError:
+        return None
 
 
 def base_date():
@@ -43,66 +58,87 @@ def base_date():
         return date.fromisoformat(re.search(r"기준일은 (\d{4}-\d{2}-\d{2})", f.read()).group(1))
 
 
-def load():
-    roster = {r["사번"]: r for r in read_csv("직원명단*.csv")}
+def load(today):
+    notes = set()
+    roster = {}
+    for r in read_csv("직원명단*.csv"):
+        if r["사번"] in roster and roster[r["사번"]] != r:
+            notes.add((NOTE_DUP, r["사번"], "-"))
+        roster.setdefault(r["사번"], r)
     courses = []
     for r in read_csv("교육과정.csv"):
         days = re.search(r"(\d+)일", r.get("신규 입사자 기한", ""))
         courses.append({"과정": r["과정"], "기한": date.fromisoformat(r["기한"]),
-                        "신규일수": int(days.group(1)) if days else 0})
+                        "신규일수": int(days.group(1)) if days else None})
+    names = {c["과정"] for c in courses}
     done = {}
-    unknown = []
     for r in read_csv("수료기록*.csv"):
         if r["사번"] not in roster:
-            unknown.append((r["사번"], r["과정"]))
+            notes.add((NOTE_UNKNOWN_ID, r["사번"], r["과정"]))
+        elif r["과정"] not in names:
+            notes.add((NOTE_COURSE, r["사번"], r["과정"]))
         else:
             done[(r["사번"], r["과정"])] = date.fromisoformat(r["수료일"])
-    return roster, courses, done, sorted(unknown)
+    return roster, courses, done, notes
 
 
-def analyze(roster, courses, done, today):
-    stats, missing, late_done, unsure_late = [], [], [], []
+def deadline(emp, course, today):
+    """(기한 또는 None, 기한 기준). None 이면 신규 입사자 여부를 판별할 수 없다."""
+    hired = parse_date(emp.get("입사일", ""))
+    if hired is None or hired > today:
+        return None, UNSURE
+    if course["신규일수"] is None:
+        return (None, UNSURE) if hired > course["기한"] else (course["기한"], BASIS_COURSE)
+    hire_due = hired + timedelta(days=course["신규일수"])
+    if hire_due > course["기한"]:
+        return hire_due, BASIS_NEW
+    return course["기한"], BASIS_COURSE
+
+
+def analyze(roster, courses, done, notes, today):
+    depts = list(dict.fromkeys(e["부서"] for e in roster.values()))
+    stats = {}
+    missing = []
     for c in courses:
-        s = {"과정": c["과정"], "대상": len(roster), "이수": 0, "미이수": 0, LATE: 0, "기한 후": 0}
+        for dept in depts + [ALL_DEPTS]:
+            stats[(c["과정"], dept)] = {"대상": 0, "이수": 0, "미이수": 0, LATE: 0, NOT_YET: 0, UNSURE: 0, "기한 후": 0}
         for emp_id, emp in sorted(roster.items()):
-            hire_due = date.fromisoformat(emp["입사일"]) + timedelta(days=c["신규일수"])
-            # 신규 입사자 후보만 두 기한을 모두 적용해 본다. 나머지는 과정 기한만.
-            dues = {c["기한"], hire_due} if hire_due > c["기한"] else {c["기한"]}
+            due, basis = deadline(emp, c, today)
+            if due is None:
+                notes.add((NOTE_NEW_HIRE, emp_id, c["과정"]))
+            buckets = [stats[(c["과정"], emp["부서"])], stats[(c["과정"], ALL_DEPTS)]]
             finished = done.get((emp_id, c["과정"]))
             if finished:
-                s["이수"] += 1
-                late = {finished > d for d in dues}
-                if late == {True}:
-                    s["기한 후"] += 1
-                    late_done.append((c["과정"], emp_id, finished.strftime("%m-%d")))
-                elif len(late) > 1:
-                    unsure_late.append((c["과정"], emp_id))
+                key = "이수"
+                if due and finished > due:
+                    notes.add((NOTE_LATE_DONE, emp_id, c["과정"]))
+                    for s in buckets:
+                        s["기한 후"] += 1
             else:
-                s["미이수"] += 1
-                statuses = {LATE if d < today else NOT_YET for d in dues}
-                if len(statuses) == 1:
-                    status, due_cell = statuses.pop(), c["기한"].strftime("%m-%d")
-                else:
-                    status = due_cell = UNSURE
-                if status == LATE:
-                    s[LATE] += 1
-                missing.append((c["과정"], emp_id, due_cell, status))
-        stats.append(s)
-    return stats, missing, late_done, unsure_late
+                status = UNSURE if due is None else (LATE if due < today else NOT_YET)
+                key = "미이수"
+                for s in buckets:
+                    s[status] += 1
+                missing.append((c["과정"], emp_id, due.strftime("%m-%d") if due else UNSURE, status))
+            for s in buckets:
+                s["대상"] += 1
+                s[key] += 1
+    return depts, stats, missing
 
 
-def read_tables(text):
-    """'## N. 제목' 섹션 번호 -> 표 본문 행(셀 리스트) 목록."""
-    tables = {}
+def read_sections(text):
+    """'## N. 제목' 섹션 번호 -> (제목, 표 본문 행 목록)."""
+    sections = {}
     for section in re.split(r"^## ", text, flags=re.M)[1:]:
-        number = section.split(".", 1)[0].strip()
+        head = section.splitlines()[0]
+        number, _, title = head.partition(".")
         rows = [
             [c.strip().strip("*").strip() for c in line.strip().strip("|").split("|")]
             for line in section.splitlines()
             if line.startswith("|")
         ]
-        tables[number] = rows[2:]  # 머리글과 구분선 제외
-    return tables
+        sections[number.strip()] = (title.strip(), rows[2:])  # 머리글과 구분선 제외
+    return sections
 
 
 def to_int(cell):
@@ -130,46 +166,42 @@ class Checker:
         return ok
 
 
-def check_report(ck, stats, missing, late_done, unsure_late, unknown):
+def check_report(ck, roster, courses, depts, stats, missing, notes):
     if not ck.check("보고서 존재", os.path.exists(REPORT), True):
         return
     with open(REPORT, encoding="utf-8") as f:
         text = f.read()
-    tables = read_tables(text)
+    sections = read_sections(text)
 
-    rows = {r[0]: r for r in tables.get("2", []) if len(r) >= 8}
-    ck.check("2장 과정 목록", sorted(k for k in rows if k != "합계"), sorted(s["과정"] for s in stats))
-    total = {"대상": 0, "이수": 0, "미이수": 0, LATE: 0, "기한 후": 0}
-    for s in stats + [None]:
-        if s is None:
-            s = dict(total, 과정="합계")
-        else:
-            for k in total:
-                total[k] += s[k]
-        row = rows.get(s["과정"])
-        actual = (tuple(to_int(c) for c in (row[2], row[3], row[4])) + (row[5],)
-                  + tuple(to_int(c) for c in (row[6], row[7]))) if row else None
-        ck.check(f"2장 {s['과정']} 대상/이수/미이수/이수율/지연/기한 후 수료", actual,
-                 (s["대상"], s["이수"], s["미이수"], rate(s["이수"], s["대상"]), s[LATE], s["기한 후"]))
-        if row and s["과정"] != "합계":
-            ck.check(f"2장 {s['과정']} 이수 + 미이수 = 명단 인원",
-                     (to_int(row[3]) or 0) + (to_int(row[4]) or 0), s["대상"])
+    ck.check("공식 형식 장 구성(부서별 이수율 → 미이수자 목록 → 확인 필요 항목)",
+             [(n, sections.get(n, ("", []))[0]) for n, _ in SECTIONS], SECTIONS)
 
-    actual = sorted((r[0], r[1], r[4], r[5]) for r in tables.get("3", []) if len(r) >= 6)
-    ck.check("3장 미이수자(과정, 사번, 기한, 상태)", actual, sorted(missing))
-    actual = sorted((r[0], r[1], r[4]) for r in tables.get("4", []) if len(r) >= 5)
-    ck.check("4장 기한 후 수료(과정, 사번, 수료일)", actual, sorted(late_done))
-    rows5 = [r for r in tables.get("5", []) if len(r) >= 4]
-    actual = sorted((r[0], r[1]) for r in rows5 if r[3] == REASON_UNKNOWN)
-    ck.check(f"5장 {REASON_UNKNOWN}(사번, 과정)", actual, unknown)
-    actual = sorted((r[1], r[0]) for r in rows5 if r[3] == REASON_HIRE)
-    ck.check(f"5장 {REASON_HIRE}로 기한 후 수료 판정 보류(과정, 사번)", actual, sorted(unsure_late))
+    rows = {(r[0], r[1]): r for r in sections.get("1", ("", []))[1] if len(r) >= 10}
+    ck.check("1장 과정·부서 목록", sorted(rows), sorted(stats))
+    for (course, dept), s in stats.items():
+        row = rows.get((course, dept))
+        actual = None
+        if row:
+            actual = tuple(to_int(c) for c in row[2:5]) + (row[5],) + tuple(to_int(c) for c in row[6:10])
+        ck.check(f"1장 {course} {dept} 대상/이수/미이수/이수율/지연/기한 전/확인 필요/기한 후 수료", actual,
+                 (s["대상"], s["이수"], s["미이수"], rate(s["이수"], s["대상"]),
+                  s[LATE], s[NOT_YET], s[UNSURE], s["기한 후"]))
+    for c in courses:
+        row = rows.get((c["과정"], ALL_DEPTS))
+        ck.check(f"1장 {c['과정']} 이수 + 미이수 = 명단 인원",
+                 (to_int(row[3]) or 0) + (to_int(row[4]) or 0) if row else None, len(roster))
+
+    actual = sorted((r[0], r[1], r[5], r[7]) for r in sections.get("2", ("", []))[1] if len(r) >= 8)
+    ck.check("2장 미이수자(과정, 사번, 기한, 상태)", actual, sorted(missing))
+
+    actual = sorted((r[0], r[1], r[2]) for r in sections.get("3", ("", []))[1] if len(r) >= 4)
+    ck.check("3장 확인 필요(구분, 사번, 과정)", actual, sorted(notes))
 
     late = [m for m in missing if m[3] == LATE]
-    ck.check("요약 미이수 연인원/실인원",
+    ck.check("머리 미이수 연인원/실인원",
              bool(re.search(rf"미이수 연인원 \*\*{len(missing)}명\*\*\(실인원 {len({m[1] for m in missing})}명\)", text)),
              True)
-    ck.check("요약 지연 연인원/실인원",
+    ck.check("머리 지연 연인원/실인원",
              bool(re.search(rf"지연 \*\*{len(late)}명\*\*\(실인원 {len({m[1] for m in late})}명\)", text)), True)
 
 
@@ -187,7 +219,7 @@ def check_drafts(ck, missing, roster):
             continue
         with open(path, encoding="utf-8") as f:
             text = f.read()
-        rows = read_tables(text).get("2", [])
+        rows = read_sections(text).get("2", ("", []))[1]
         ck.check(f"독려_{emp_id} 이름", roster[emp_id]["이름"] in text, True)
         ck.check(f"독려_{emp_id} 미이수 과정/상태",
                  sorted((r[0], r[3]) for r in rows if len(r) >= 4), sorted((c, LATE) for c in late[emp_id]))
@@ -197,19 +229,21 @@ def main():
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8")
     today = base_date()
-    roster, courses, done, unknown = load()
-    stats, missing, late_done, unsure_late = analyze(roster, courses, done, today)
+    roster, courses, done, notes = load(today)
+    depts, stats, missing = analyze(roster, courses, done, notes, today)
 
-    print(f"기준일 {today} / 명단 {len(roster)}명 / 과정 {len(courses)}개")
-    for s in stats:
-        print(f"  {s['과정']}: 이수 {s['이수']} · 미이수 {s['미이수']} (지연 {s[LATE]}) · 기한 후 수료 {s['기한 후']}")
-    print(f"  명단에 없는 사번: {unknown or '없음'}")
-    unsure = sorted({m[1] for m in missing if m[3] == UNSURE} | {u[1] for u in unsure_late})
-    print(f"  신규 입사자 기한 미확정으로 '{UNSURE}': {unsure or '없음'}")
+    print(f"기준일 {today} / 명단 {len(roster)}명 / 부서 {len(depts)}개 / 과정 {len(courses)}개")
+    for c in courses:
+        s = stats[(c["과정"], ALL_DEPTS)]
+        print(f"  {c['과정']}: 이수 {s['이수']} · 미이수 {s['미이수']} "
+              f"(지연 {s[LATE]}, 기한 전 {s[NOT_YET]}, 확인 필요 {s[UNSURE]}) · 기한 후 수료 {s['기한 후']}")
+    new_hires = sorted({e for e, emp in roster.items() for c in courses if deadline(emp, c, today)[1] == BASIS_NEW})
+    print(f"  신규 입사자 기한 적용: {new_hires or '없음'}")
+    print(f"  확인 필요: {sorted(notes) or '없음'}")
     print()
 
     ck = Checker()
-    check_report(ck, stats, missing, late_done, unsure_late, unknown)
+    check_report(ck, roster, courses, depts, stats, missing, notes)
     check_drafts(ck, missing, roster)
 
     print()
