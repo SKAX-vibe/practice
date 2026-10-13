@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>실습 결과 대시보드</title>
+  <meta name="description" content="바이브코딩 입문 실습 A·B·C·D 트랙 결과물(집계 · 보고서 · 검증 결과) 시각화">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="topbar-inner">
+      <div class="brand">
+        <span class="brand-mark" aria-hidden="true"></span>
+        <div>
+          <h1>실습 결과 대시보드</h1>
+          <p class="brand-sub">바이브코딩 입문 · 트랙별 결과물 · 모든 자료는 실습용 가상 데이터</p>
+        </div>
+      </div>
+      <button type="button" class="theme-toggle" id="themeToggle" aria-label="화면 테마 전환">테마</button>
+    </div>
+  </header>
+
+  <main class="page">
+    <nav class="track-tabs" role="tablist" aria-label="트랙 선택" id="trackTabs"></nav>
+
+    <div id="notice" class="notice" hidden></div>
+
+    <section id="trackView" aria-live="polite">
+      <div class="loading">불러오는 중…</div>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <div class="footer-inner">
+      화면의 수치는 각 트랙의 <code>report/</code> 결과물에서 생성한 공개용 집계(<code>data/dashboard.json</code>)만 사용합니다. 개인 · 거래 단위 내역과 원문은 포함하지 않으며, 대상 3명 미만 부서는 다른 소규모 부서와 합산해 표시합니다.
+    </div>
+  </footer>
+
+  <div id="tip" class="tip" role="tooltip" hidden></div>
+  <script src="app.js"></script>
+</body>
+</html>
