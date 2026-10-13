@@ -17,11 +17,16 @@
           <p class="brand-sub">바이브코딩 입문 · 트랙별 결과물 · 모든 자료는 실습용 가상 데이터</p>
         </div>
       </div>
-      <button type="button" class="theme-toggle" id="themeToggle" aria-label="화면 테마 전환">테마</button>
+      <div class="topbar-actions">
+        <span class="mode-chip" id="modeChip" hidden></span>
+        <button type="button" class="theme-toggle" id="themeToggle" aria-label="화면 테마 전환">테마</button>
+      </div>
     </div>
   </header>
 
   <main class="page">
+    <div id="modeBanner" class="mode-banner" role="note" hidden></div>
+
     <nav class="track-tabs" role="tablist" aria-label="트랙 선택" id="trackTabs"></nav>
 
     <div id="notice" class="notice" hidden></div>
@@ -33,7 +38,7 @@
 
   <footer class="footer">
     <div class="footer-inner">
-      화면의 수치는 각 트랙의 <code>report/</code> 결과물에서 생성한 공개용 집계(<code>data/dashboard.json</code>)만 사용합니다. 개인 · 거래 단위 내역과 원문은 포함하지 않으며, 대상 3명 미만 부서는 다른 소규모 부서와 합산해 표시합니다.
+      화면은 <code>data/dashboard.json</code> 한 파일만 읽습니다. 공개 사이트에는 가상 데모 데이터가, 내부 확인용에는 각 트랙 <code>report/</code>의 집계(개인 · 거래 단위 내역과 원문 제외, 대상 3명 미만 부서는 합산)가 들어갑니다. 현재 데이터 종류는 화면 상단에 표시됩니다.
     </div>
   </footer>
 

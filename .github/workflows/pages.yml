@@ -1,0 +1,59 @@
+name: Deploy dashboard to GitHub Pages
+
+# 공개 사이트에는 가상 데모 데이터(dashboard/data/demo.json)만 올린다.
+# 실제 실습 결과 집계(dashboard/data/dashboard.json), 트랙 폴더, answers/, new-data/ 는 올리지 않는다.
+on:
+  workflow_dispatch:   # 수동 실행만 허용 (push 자동 배포 없음)
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.14"
+
+      - name: Check demo data is up to date
+        shell: bash
+        run: |
+          python dashboard/tools/build_demo.py --out "$RUNNER_TEMP/demo.json"
+          if ! cmp -s "$RUNNER_TEMP/demo.json" dashboard/data/demo.json; then
+            echo "dashboard/data/demo.json 이 build_demo.py 결과와 다릅니다. 다시 생성해 커밋하세요." >&2
+            exit 1
+          fi
+
+      - name: Build site (dashboard public files + demo data only)
+        shell: bash
+        run: |
+          mkdir -p _site/data
+          cp dashboard/index.html dashboard/styles.css dashboard/app.js _site/
+          cp dashboard/data/demo.json _site/data/dashboard.json
+          find _site -type f | sort
+
+      - name: Public exposure check
+        run: python dashboard/tools/check_public.py _site --strict --demo
+
+      - uses: actions/upload-pages-artifact@v4
+        with:
+          path: _site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

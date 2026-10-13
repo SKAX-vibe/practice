@@ -5,12 +5,17 @@
 금지어 일부는 원본 자료(직원명단 · 수료기록 · 단가표 · 정답 파일)에서 직접 뽑는다.
 
 사용법 (저장소 최상위 폴더에서):
-    python dashboard/tools/check_public.py dashboard          # 개발 폴더의 공개 파일 점검
-    python dashboard/tools/check_public.py _site --strict     # 배포 폴더: 허용 목록 외 파일이 있으면 실패
+    python dashboard/tools/check_public.py dashboard               # 개발 폴더의 공개 파일 점검
+    python dashboard/tools/check_public.py _site --strict --demo   # 배포 폴더 점검
+
+--strict: 허용 목록 외 파일이 있으면 실패
+--demo:   data/dashboard.json 이 데모 데이터(mode: demo)여야 하며,
+          실제 집계 값 · 실제 거래처명이 하나라도 들어 있으면 실패
 """
 
 import argparse
 import csv
+import json
 import re
 import sys
 from pathlib import Path
@@ -68,6 +73,59 @@ def dynamic_terms():
     return sorted(set(terms))
 
 
+def leaves(obj):
+    """JSON의 모든 문자열 · 숫자 값을 돌려준다."""
+    if isinstance(obj, dict):
+        for v in obj.values():
+            yield from leaves(v)
+    elif isinstance(obj, list):
+        for v in obj:
+            yield from leaves(v)
+    elif isinstance(obj, (str, int, float)) and not isinstance(obj, bool):
+        yield obj
+
+
+def digits_value(v):
+    d = re.sub(r"\D", "", str(v))
+    return int(d) if d else None
+
+
+def demo_problems(site):
+    """공개 데이터가 데모인지, 실제 집계 값 · 거래처명이 섞이지 않았는지 확인한다."""
+    path = site / "data" / "dashboard.json"
+    if not path.exists():
+        return []
+    data = json.loads(path.read_text(encoding="utf-8"))
+    problems = []
+    if data.get("mode") != "demo":
+        problems.append(f"[데모 아님] data/dashboard.json 의 mode 가 'demo' 가 아닙니다: {data.get('mode')!r}")
+
+    sys.dont_write_bytecode = True  # 저장소에 __pycache__ 를 남기지 않는다
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    import build_data  # 실제 집계를 메모리에서만 만들어 비교한다 (파일로 쓰지 않음)
+    real = build_data.build()
+    # 숫자 10 이상이 들어간 실제 값(예: 188,000원, 83.3%, +225,000원, 40개)은 데모에 나오면 안 된다.
+    real_values = {str(v) for v in leaves(real) if (digits_value(v) or 0) >= 10}
+    real_values -= {str(v) for v in leaves(DEMO_ALLOWED)}
+    real_names = {r["거래처"] for r in read_csv("fin-invoice/data/발주.csv")}
+    for f in sorted((REPO / "sales-quote" / "inbox").glob("*.txt")) + sorted((REPO / "new-data").rglob("견적문의_*.txt")):
+        m = re.search(r"보낸 사람:\s*(\S+)", f.read_text(encoding="utf-8-sig"))
+        if m:
+            real_names.add(m.group(1))
+
+    for v in leaves(data):
+        if str(v) in real_values:
+            problems.append(f"[실제 값 노출] data/dashboard.json 에 실제 집계 값과 같은 값: {v!r}")
+        for name in real_names:
+            if name in str(v):
+                problems.append(f"[실제 거래처명] data/dashboard.json → {name!r}")
+    return sorted(set(problems))
+
+
+# 데모와 실제 데이터에 공통으로 나와도 되는 화면 고정 값 (축 눈금 등)
+DEMO_ALLOWED = ["0%", "25%", "50%", "75%", "100%", 100, "100.0%"]
+
+
 def term_regex(term):
     # 숫자로 시작하는 값(단가 · 날짜)은 더 긴 숫자의 일부로 잡히지 않게 경계를 둔다.
     pre = r"(?<![\d,])" if term[:1].isdigit() else ""
@@ -78,6 +136,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("site", help="점검할 폴더 (dashboard 또는 배포용 _site)")
     ap.add_argument("--strict", action="store_true", help="허용 목록 외 파일이 있으면 실패")
+    ap.add_argument("--demo", action="store_true", help="공개 데이터가 데모인지, 실제 값이 섞이지 않았는지 확인")
     args = ap.parse_args()
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
@@ -105,7 +164,12 @@ def main():
                 if m:
                     problems.append(f"[노출] {f}:{no} {name} → {m.group(0)!r}")
 
+    if args.demo:
+        problems += demo_problems(site)
+
     print(f"점검 폴더: {site}")
+    if args.demo:
+        print("데모 점검: mode=demo · 실제 집계 값 · 실제 거래처명")
     print(f"공개 파일 {len(PUBLIC_FILES)}개 · 규칙 {len(rules)}개 (고정 패턴 {len(PATTERNS)} + 원본 자료 금지어 {len(rules) - len(PATTERNS)})")
     print(f"허용한 집계 라벨: {', '.join(sorted(ALLOWED_LABELS))}")
     if problems:

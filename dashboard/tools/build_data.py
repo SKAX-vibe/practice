@@ -300,7 +300,13 @@ def build():
         t["verify"] = verify_summary(t["key"])
         t["sources"].append(f"{t['key']}/report/검증결과.md")
         tracks.append(t)
-    return {"title": "실습 결과 대시보드", "min_group": MIN_GROUP, "tracks": tracks}
+    return {
+        "title": "실습 결과 대시보드",
+        "mode": "internal",
+        "notice": "내부 실습 결과입니다. 각 트랙 report/ 결과물의 집계이며 외부 공개용이 아닙니다.",
+        "min_group": MIN_GROUP,
+        "tracks": tracks,
+    }
 
 
 def main():

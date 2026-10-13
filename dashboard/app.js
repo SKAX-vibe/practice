@@ -101,29 +101,45 @@ const kpiHtml = (k) => `
     ${k.sub ? `<div class="kpi-sub">${esc(k.sub)}</div>` : ''}
   </div>`;
 
-const card = (title, body, extra = '') => `
+const isDemo = () => DATA?.mode === 'demo';
+const demoChip = () => (isDemo() ? '<span class="chip-demo">예시 데이터</span>' : '');
+
+const card = (title, body) => `
   <section class="card">
-    <div class="card-head"><h3>${esc(title)}</h3>${extra}</div>
+    <div class="card-head"><h3>${esc(title)}</h3>${demoChip()}</div>
     <div class="card-body">${body}</div>
   </section>`;
 
-const verdictBadge = (v) => (v === 'PASS'
-  ? '<span class="badge badge-pass">✓ PASS</span>'
-  : v ? `<span class="badge badge-fail">✕ ${esc(v)}</span>` : '<span class="badge badge-unknown">확인 불가</span>');
+const verdictBadge = (v) => {
+  if (v === 'DEMO') return '<span class="badge badge-demo">예시</span>';
+  if (v === 'PASS') return '<span class="badge badge-pass">✓ PASS</span>';
+  return v ? `<span class="badge badge-fail">✕ ${esc(v)}</span>` : '<span class="badge badge-unknown">확인 불가</span>';
+};
+const resultPill = (r) => {
+  if (r === 'DEMO') return '<span class="pill pill-demo">예시</span>';
+  return r === 'PASS' ? '<span class="pill pill-good">✓ PASS</span>' : `<span class="pill pill-critical">✕ ${esc(r)}</span>`;
+};
 
 function verifyCard(v) {
+  const demo = v.final === 'DEMO';
   const pass = v.final === 'PASS';
   const rows = v.checks.map((c) => `
     <tr>
       <td>${esc(c.method)}</td>
-      <td>${c.result === 'PASS' ? '<span class="pill pill-good">✓ PASS</span>' : `<span class="pill pill-critical">✕ ${esc(c.result)}</span>`}</td>
+      <td>${resultPill(c.result)}</td>
       <td class="num">${c.total ? `${c.passed} / ${c.total} 항목` : '-'}</td>
     </tr>`).join('');
-  return card('검증 결과', `
-    <div class="verify-summary ${pass ? 'pass' : 'fail'}">
-      <div class="verify-big">${pass ? '✓ PASS' : `✕ ${esc(v.final || '결과 없음')}`}</div>
-      <div class="verify-meta">최종 결과 · 실행일 ${esc(v.run_date || '-')} · 기준일 ${esc(v.base_date || '-')}</div>
-    </div>
+  const summary = demo
+    ? `<div class="verify-summary demo">
+        <div class="verify-big">예시</div>
+        <div class="verify-meta">데모 화면입니다. 실제 검증 스크립트를 실행한 결과가 아닙니다.</div>
+      </div>`
+    : `<div class="verify-summary ${pass ? 'pass' : 'fail'}">
+        <div class="verify-big">${pass ? '✓ PASS' : `✕ ${esc(v.final || '결과 없음')}`}</div>
+        <div class="verify-meta">최종 결과 · 실행일 ${esc(v.run_date || '-')} · 기준일 ${esc(v.base_date || '-')}</div>
+      </div>`;
+  return card(demo ? '검증 결과 (예시)' : '검증 결과', `
+    ${summary}
     <div class="table-wrap"><table>
       <thead><tr><th scope="col">검증 방법</th><th scope="col">결과</th><th class="num" scope="col">통과 항목</th></tr></thead>
       <tbody>${rows}</tbody>
@@ -150,7 +166,9 @@ function renderTrack(id) {
     <div class="track-head">
       <div>
         <h2>${esc(t.id)} · ${esc(t.name)} — ${esc(t.desc)}</h2>
-        <div class="track-meta"><span>기준일 ${esc(t.verify.base_date || '-')}</span><span>검증 실행일 ${esc(t.verify.run_date || '-')}</span></div>
+        <div class="track-meta">${isDemo()
+          ? '<span>가상 예시 데이터</span><span>실제 실습 결과 아님</span>'
+          : `<span>기준일 ${esc(t.verify.base_date || '-')}</span><span>검증 실행일 ${esc(t.verify.run_date || '-')}</span>`}</div>
       </div>
       ${verdictBadge(t.verify.final)}
     </div>
@@ -161,7 +179,24 @@ function renderTrack(id) {
       ${verifyCard(t.verify)}
     </div>
     ${t.tables.map((tb) => card(tb.title, tableHtml(tb))).join('')}
-    <p class="sources">집계 출처: ${t.sources.map((s) => `<code>${esc(s)}</code>`).join(' ')}</p>`;
+    <p class="sources">${isDemo()
+      ? '데이터 출처: 가상 데모 데이터 (저장소의 실습 결과물과 무관)'
+      : `집계 출처: ${t.sources.map((s) => `<code>${esc(s)}</code>`).join(' ')}`}</p>`;
+}
+
+/* ---------- Data mode (데모 / 내부) ---------- */
+
+function showMode() {
+  const demo = isDemo();
+  document.documentElement.dataset.mode = demo ? 'demo' : 'internal';
+  if (demo) document.title = `${document.title} (데모)`;
+  $('#modeChip').textContent = demo ? 'DEMO · 예시 데이터' : '내부 실습 결과';
+  $('#modeChip').hidden = false;
+  const banner = $('#modeBanner');
+  banner.innerHTML = demo
+    ? `<strong>데모 데이터</strong><span>${esc(DATA.notice || '')}</span>`
+    : `<strong>내부 실습 결과</strong><span>${esc(DATA.notice || '')}</span>`;
+  banner.hidden = false;
 }
 
 /* ---------- Tabs ---------- */
@@ -235,6 +270,7 @@ async function boot() {
     $('#trackView').innerHTML = '';
     return;
   }
+  showMode();
   buildTabs();
   const route = () => renderTrack((location.hash.slice(1) || 'A').toUpperCase());
   window.addEventListener('hashchange', route);
