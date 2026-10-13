@@ -2,6 +2,8 @@
 
 사용법: python scripts/verify.py
 원본과 보고서는 읽기만 한다. 모두 일치하면 종료 코드 0, 불일치가 있으면 1.
+유형은 TYPE_ALIASES 기준으로 정규화해 집계한다(D트랙: 긁힘 → 스크래치).
+보고서의 유형 칸에 붙은 괄호 주석(예: "스크래치 (원본: 긁힘)")은 비교에서 제외한다.
 """
 import glob
 import os
@@ -16,6 +18,12 @@ REPORT = os.path.join(ROOT, "report", "품질주간.md")
 NO_CAUSE = "원인 미기재"
 NO_ACTION = "조치 미기재"
 DONE = "조치 완료"
+TYPE_ALIASES = {"긁힘": "스크래치"}
+
+
+def normalize_type(value):
+    base = re.sub(r"\s*\(.*\)\s*$", "", value).strip()
+    return TYPE_ALIASES.get(base, base)
 
 
 def load_records():
@@ -29,7 +37,7 @@ def load_records():
             "파일": name,
             "날짜": f"{mmdd[:2]}-{mmdd[2:]}",
             "라인": fields.get("라인", ""),
-            "유형": fields.get("유형", ""),
+            "유형": normalize_type(fields.get("유형", "")),
             "수량": int(fields.get("수량") or 0),
             "원인": fields.get("원인") or NO_CAUSE,
             "조치": fields.get("조치") or NO_ACTION,
@@ -88,10 +96,15 @@ def check_summary_table(ck, tables, number, title, key, records):
     expected = aggregate(records, key)
     total = (len(records), sum(r["수량"] for r in records))
     found = {}
+    duplicates = []
     for row in rows:
         if len(row) < 3:
             continue
-        found[row[0]] = (to_int(row[1]), to_int(row[2]))
+        name = normalize_type(row[0]) if key == "유형" else row[0]
+        if name in found:
+            duplicates.append(row[0])
+        found[name] = (to_int(row[1]), to_int(row[2]))
+    ck.check(f"{number}장 {title} 정규화 후 중복 항목 없음", duplicates, [])
     ck.check(f"{number}장 {title} 항목 목록", sorted(k for k in found if k != "합계"), sorted(expected))
     for name in sorted(expected):
         c, q = expected[name]
@@ -112,7 +125,9 @@ def check_open_actions(ck, tables, records):
     ]
     ck.check("5장 미완료 조치 행 수", len(rows), len(expected))
     for i, exp in enumerate(expected):
-        actual = rows[i] if i < len(rows) else None
+        actual = list(rows[i]) if i < len(rows) else None
+        if actual and len(actual) > 2:
+            actual[2] = normalize_type(actual[2])
         ck.check(f"5장 미완료 조치 {exp[0]} {exp[1]}라인", actual, exp)
 
 
