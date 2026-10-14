@@ -90,6 +90,14 @@ def digits_value(v):
     return int(d) if d else None
 
 
+VALUE_LIKE = re.compile(r"^[+\-−]?[\d,.]+\s*(?:원|건|명|개|%|항목|곳)?$")
+
+
+def is_value_like(v):
+    """숫자, 또는 숫자 형태의 값 문자열(예: '188,000원')만 비교한다. 라벨 문장은 제외."""
+    return isinstance(v, (int, float)) or bool(VALUE_LIKE.match(str(v).strip()))
+
+
 def demo_problems(site):
     """공개 데이터가 데모인지, 실제 집계 값 · 거래처명이 섞이지 않았는지 확인한다."""
     path = site / "data" / "dashboard.json"
@@ -99,13 +107,17 @@ def demo_problems(site):
     problems = []
     if data.get("mode") != "demo":
         problems.append(f"[데모 아님] data/dashboard.json 의 mode 가 'demo' 가 아닙니다: {data.get('mode')!r}")
+    # 공개 데모의 검증 결과는 예시 표시만 허용한다 (실제 검증 결과 · 통과 항목 수 금지).
+    for t in data.get("tracks", []):
+        if t.get("verify") != {"final": "DEMO"}:
+            problems.append(f"[검증 결과 노출] 트랙 {t.get('id')} 의 verify 는 {{'final': 'DEMO'}} 만 허용합니다: {t.get('verify')!r}")
 
     sys.dont_write_bytecode = True  # 저장소에 __pycache__ 를 남기지 않는다
     sys.path.insert(0, str(Path(__file__).resolve().parent))
     import build_data  # 실제 집계를 메모리에서만 만들어 비교한다 (파일로 쓰지 않음)
     real = build_data.build()
     # 숫자 10 이상이 들어간 실제 값(예: 188,000원, 83.3%, +225,000원, 40개)은 데모에 나오면 안 된다.
-    real_values = {str(v) for v in leaves(real) if (digits_value(v) or 0) >= 10}
+    real_values = {str(v) for v in leaves(real) if is_value_like(v) and (digits_value(v) or 0) >= 10}
     real_values -= {str(v) for v in leaves(DEMO_ALLOWED)}
     real_names = {r["거래처"] for r in read_csv("fin-invoice/data/발주.csv")}
     for f in sorted((REPO / "sales-quote" / "inbox").glob("*.txt")) + sorted((REPO / "new-data").rglob("견적문의_*.txt")):
@@ -114,7 +126,7 @@ def demo_problems(site):
             real_names.add(m.group(1))
 
     for v in leaves(data):
-        if str(v) in real_values:
+        if is_value_like(v) and str(v) in real_values:
             problems.append(f"[실제 값 노출] data/dashboard.json 에 실제 집계 값과 같은 값: {v!r}")
         for name in real_names:
             if name in str(v):

@@ -1,7 +1,8 @@
-"""공개용 대시보드 데이터 생성.
+"""내부용 대시보드 데이터 생성 (구조 v2).
 
 각 트랙의 report/ 결과물을 읽어 집계 수치만 dashboard/data/dashboard.json 으로 쓴다.
 원문 문장, 행 단위 내역(발주번호 · 사번 · 이름 · 품목), 단가, 확인 필요 항목의 내용은 넣지 않는다.
+모든 수치는 {value, unit} 로 단위를 함께 적는다 (건 · 명 · 개 · 원 · % · 항목).
 
 사용법 (저장소 최상위 폴더에서):
     python dashboard/tools/build_data.py            # dashboard/data/dashboard.json 생성
@@ -18,7 +19,7 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[2]
 DEFAULT_OUT = REPO / "dashboard" / "data" / "dashboard.json"
 
-# 대상 인원이 이 값보다 적은 부서는 개인 식별을 막기 위해 '기타 부서(합산)'로 묶는다.
+# 대상 인원이 이 값보다 적은 부서는 개인 식별을 막기 위해 '기타 N개 부서'로 묶는다.
 MIN_GROUP = 3
 
 
@@ -49,8 +50,7 @@ def md_tables(src):
             split = lambda r: [c.strip() for c in r.strip().strip("|").split("|")]
             headers = [clean(h) for h in split(buf[0])]
             body = [split(r) for r in buf[1:] if not re.fullmatch(r"[\s|:\-]+", r)]
-            rows = [dict(zip(headers, (clean(c) for c in r))) for r in body]
-            tables.append({"headers": headers, "rows": rows})
+            tables.append({"headers": headers, "rows": [dict(zip(headers, (clean(c) for c in r))) for r in body]})
         buf.clear()
 
     for line in src.split("\n"):
@@ -70,11 +70,46 @@ def find_table(tables, *cols):
 
 
 def is_total(row):
-    return next(iter(row.values()), "") in ("합계",)
+    return next(iter(row.values()), "") == "합계"
+
+
+def body_rows(table):
+    return [r for r in table["rows"] if not is_total(r)]
+
+
+def total_row(table):
+    return next(r for r in table["rows"] if is_total(r))
+
+
+def source_count(src, filename, unit):
+    """보고서 '출처' 줄의 `파일명` N건/명 값을 읽는다."""
+    m = re.search(rf"{re.escape(filename)}`\s*(\d+){unit}", src)
+    if not m:
+        raise ValueError(f"출처 줄에서 {filename} {unit} 를 찾지 못했습니다")
+    return int(m.group(1))
+
+
+def section_list_count(src, heading_prefix):
+    """'## N. 제목' 절 안의 번호 목록 개수."""
+    m = re.search(rf"^## {re.escape(heading_prefix)}.*?$(.*?)(?=^## |\Z)", src, re.M | re.S)
+    if not m:
+        raise ValueError(f"절을 찾지 못했습니다: {heading_prefix}")
+    return len(re.findall(r"^\d+\. ", m.group(1), re.M))
 
 
 def count_drafts(track, pattern):
     return len(list((REPO / track / "outbox" / "drafts").glob(pattern)))
+
+
+def q(value, unit, label=None):
+    item = {"value": value, "unit": unit}
+    if label:
+        item = {"label": label, **item}
+    return item
+
+
+def pct(a, b):
+    return round(a / b * 100, 1) if b else 0.0
 
 
 def verify_summary(track):
@@ -82,214 +117,206 @@ def verify_summary(track):
     final = re.search(r"최종 결과:\s*(\S+)", src)
     run = re.search(r"실행일:\s*([\d-]+)", src)
     base = re.search(r"기준일:\s*([\d-]+)", src)
-    checks = []
+    out = {"final": final.group(1) if final else "", "run_date": run.group(1) if run else "",
+           "base_date": base.group(1) if base else ""}
     for row in find_table(md_tables(src), "검증 대상", "방법", "결과")["rows"]:
         m = re.match(r"(PASS|FAIL)\s*(?:\((\d+)/(\d+)\))?", row["결과"])
-        label = "자동 검증 스크립트" if "verify.py" in row["방법"] else row["방법"]
-        item = {"method": label, "result": m.group(1) if m else row["결과"]}
-        if m and m.group(2):
-            item["passed"], item["total"] = int(m.group(2)), int(m.group(3))
-        checks.append(item)
-    return {
-        "final": final.group(1) if final else "",
-        "run_date": run.group(1) if run else "",
-        "base_date": base.group(1) if base else "",
-        "checks": checks,
-    }
-
-
-def won(n):
-    return f"{n:,}원"
-
-
-def signed_won(n):
-    return ("+" if n > 0 else "−" if n < 0 else "") + f"{abs(n):,}원"
-
-
-def pct(a, b):
-    return round(a / b * 100, 1) if b else 0.0
+        if "verify.py" in row["방법"] and m:
+            out["script"] = {"result": m.group(1), "passed": q(int(m.group(2)), "항목"), "total": q(int(m.group(3)), "항목")}
+        elif row["방법"] == "사실성 검토" and m:
+            out["factual"] = m.group(1)
+    return out
 
 
 # ---------- 트랙별 집계 ----------
 
 def track_a():
     key = "sales-quote"
-    src = f"{key}/report/견적처리.md"
-    main = find_table(md_tables(read(src)), "거래처", "품목 수", "견적 금액")
-    rows = [r for r in main["rows"] if not is_total(r)]
-    total = next(r for r in main["rows"] if is_total(r))
-    amount = sum(to_num(r["견적 금액"]) for r in rows)
-    assert amount == to_num(total["견적 금액"]), "견적 금액 합계 불일치"
-    items = sum(to_num(r["품목 수"]) for r in rows)
+    src_path = f"{key}/report/견적처리.md"
+    src = read(src_path)
+    main = find_table(md_tables(src), "거래처", "품목 수", "견적 금액", "확인 필요")
+    rows, total = body_rows(main), total_row(main)
+    inquiries = [{
+        "name": r["거래처"],
+        "items": q(to_num(r["품목 수"]), "개"),
+        "amount": q(to_num(r["견적 금액"]), "원"),
+        "review": q(to_num(r["확인 필요"]), "개"),
+        "draft": bool(r.get("초안")),
+    } for r in rows]
+    amount = sum(i["amount"]["value"] for i in inquiries)
+    items = sum(i["items"]["value"] for i in inquiries)
+    review = sum(i["review"]["value"] for i in inquiries)
+    assert (amount, items, review) == (to_num(total["견적 금액"]), to_num(total["품목 수"]), to_num(total["확인 필요"])), "A 합계 불일치"
+    drafts = count_drafts(key, "회신_*.md")
+    assert drafts == sum(i["draft"] for i in inquiries), "A 초안 수 불일치"
+    other = section_list_count(src, "4.")
     return {
-        "id": "A", "key": key, "name": "영업", "desc": "견적 문의 회신",
-        "sources": [src],
-        "kpis": [
-            {"label": "견적 문의", "value": f"{len(rows)}건", "sub": f"품목 {items}개"},
-            {"label": "회신 초안", "value": f"{count_drafts(key, '회신_*.md')}건", "tone": "good"},
-            {"label": "견적 금액 합계", "value": won(amount), "sub": "부가세 별도"},
-            {"label": "확인 필요 품목", "value": f"{to_num(total['확인 필요'])}개", "tone": "warn"},
-        ],
-        "charts": [{
-            "type": "bar", "title": "거래처별 견적 금액",
-            "items": [{"label": r["거래처"], "value": to_num(r["견적 금액"]), "display": won(to_num(r["견적 금액"]))} for r in rows],
-        }],
-        "tables": [{
-            "title": "거래처별 견적 집계",
-            "headers": ["거래처", "품목 수", "견적 금액"],
-            "align": ["left", "right", "right"],
-            "rows": [[r["거래처"], f"{to_num(r['품목 수'])}개", won(to_num(r["견적 금액"]))] for r in rows],
-            "total": ["합계", f"{items}개", won(amount)],
-        }],
+        "id": "A", "key": key, "name": "영업", "task": "견적 문의 회신",
+        "question": "바로 보낼 수 있는 회신과, 사람이 확인할 항목은 무엇인가",
+        "sources": [src_path],
+        "flow": {
+            "input": [q(len(inquiries), "건", "견적 문의")],
+            "output": [q(drafts, "건", "회신 초안")],
+            "review": [q(review, "개", "확인 필요 품목"), q(other, "건", "품목 외 확인 사항")],
+        },
+        "view": "quotes",
+        "detail": {
+            "amount_total": q(amount, "원"),
+            "amount_note": "부가세 별도 · 확인 필요 품목 제외",
+            "items_total": q(items, "개"),
+            "items_quoted": q(items - review, "개"),
+            "items_review": q(review, "개"),
+            "other_review": q(other, "건"),
+            "inquiries": inquiries,
+        },
     }
 
 
 def track_b():
     key = "hr-training"
-    src = f"{key}/report/교육이수.md"
-    tables = md_tables(read(src))
+    src_path = f"{key}/report/교육이수.md"
+    src = read(src_path)
+    tables = md_tables(src)
     main = find_table(tables, "과정", "부서", "대상", "이수", "이수율")
-    missing = find_table(tables, "사번", "상태", "기한")
+    late_table = find_table(tables, "사번", "상태", "기한")
     check = find_table(tables, "구분", "사번", "내용")
 
     courses = list(dict.fromkeys(r["과정"] for r in main["rows"]))
     dept_rows = [r for r in main["rows"] if r["부서"] != "전체"]
     depts = list(dict.fromkeys(r["부서"] for r in dept_rows))
     size = {d: to_num(next(r for r in dept_rows if r["부서"] == d)["대상"]) for d in depts}
-    shown = [d for d in depts if size[d] >= MIN_GROUP]
     merged = [d for d in depts if size[d] < MIN_GROUP]
     if merged and sum(size[d] for d in merged) < MIN_GROUP:
         raise ValueError("합산해도 소규모인 부서가 남습니다")
     other = f"기타 {len(merged)}개 부서"
+    groups = [(d, [d]) for d in depts if d not in merged] + ([(other, merged)] if merged else [])
 
     def agg(course, ds):
         rs = [r for r in dept_rows if r["과정"] == course and r["부서"] in ds]
-        t, d, l = (sum(to_num(r[c]) for r in rs) for c in ("대상", "이수", "지연"))
-        return {"대상": t, "이수": d, "미이수": t - d, "지연": l, "이수율": pct(d, t)}
+        target, done = (sum(to_num(r[c]) for r in rs) for c in ("대상", "이수"))
+        return {"course": course, "target": q(target, "명"), "done": q(done, "명"), "rate": q(pct(done, target), "%")}
 
-    groups = [(d, [d]) for d in shown] + ([(other, merged)] if merged else [])
-    overall = {c: agg(c, depts) for c in courses}
-    for c in courses:  # 보고서의 '전체' 행과 같은지 확인
-        row = next(r for r in main["rows"] if r["과정"] == c and r["부서"] == "전체")
-        assert overall[c]["이수"] == to_num(row["이수"]) and overall[c]["대상"] == to_num(row["대상"]), f"{c} 합계 불일치"
-
-    late = [r for r in missing["rows"] if r["상태"] == "지연"]
-    kpis = [
-        {"label": f"{c} 이수율", "value": f"{overall[c]['이수율']:.1f}%",
-         "sub": f"이수 {overall[c]['이수']}명 / 대상 {overall[c]['대상']}명",
-         **({"tone": "good"} if overall[c]["이수율"] >= 100 else {})}
-        for c in courses
-    ]
-    kpis += [
-        {"label": "지연 (연인원)", "value": f"{len(late)}명", "sub": f"실인원 {len({r['사번'] for r in late})}명 · 독려 초안 {count_drafts(key, '독려_*.md')}건", "tone": "warn"},
-        {"label": "확인 필요 항목", "value": f"{len(check['rows'])}건", "sub": "담당자 판단 필요", "tone": "warn"},
-    ]
-    fmt_row = lambda c, label, a: [c, label, f"{a['대상']}명", f"{a['이수']}명", f"{a['미이수']}명", f"{a['이수율']:.1f}%", f"{a['지연']}명"]
-    rows, total_rows = [], []
+    overall = []
     for c in courses:
-        rows += [fmt_row(c, label, agg(c, ds)) for label, ds in groups]
-        total_rows.append(len(rows))
-        rows.append(fmt_row(c, "전체", overall[c]))
+        a = agg(c, depts)
+        row = next(r for r in main["rows"] if r["과정"] == c and r["부서"] == "전체")
+        assert (a["target"]["value"], a["done"]["value"]) == (to_num(row["대상"]), to_num(row["이수"])), f"B {c} 합계 불일치"
+        overall.append(a)
+
+    late = [r for r in late_table["rows"] if r["상태"] == "지연"]
+    late_people = len({r["사번"] for r in late})
+    drafts = count_drafts(key, "독려_*.md")
+    roster = source_count(src, "직원명단.csv", "명")
+    records = source_count(src, "수료기록.csv", "건")
+    assert roster == overall[0]["target"]["value"], "B 명단 인원 불일치"
     return {
-        "id": "B", "key": key, "name": "인사", "desc": "교육 이수 · 독려",
-        "sources": [src],
-        "note": f"개인 식별 방지: 대상 {MIN_GROUP}명 미만 부서({', '.join(merged)})는 '{other}'로 합산해 표시합니다." if merged else "",
-        "kpis": kpis,
-        "charts": [{
-            "type": "grouped", "title": "부서별 이수율", "series": courses, "max": 100,
-            "ticks": ["0%", "25%", "50%", "75%", "100%"],
-            "groups": [{"label": label, "values": [
-                {"series": c, "value": agg(c, ds)["이수율"], "display": f"{agg(c, ds)['이수율']:.1f}%",
-                 "tip": f"이수 {agg(c, ds)['이수']}명 / 대상 {agg(c, ds)['대상']}명"} for c in courses]}
-                for label, ds in groups],
-        }],
-        "tables": [{
-            "title": "과정 · 부서별 이수 현황",
-            "headers": ["과정", "부서", "대상", "이수", "미이수", "이수율", "지연"],
-            "align": ["left", "left", "right", "right", "right", "right", "right"],
-            "rows": rows,
-            "total_rows": total_rows,
-        }],
+        "id": "B", "key": key, "name": "인사", "task": "교육 이수 · 독려",
+        "question": "과정별 이수는 어느 정도이고, 지연자 독려는 빠짐없이 준비됐는가",
+        "sources": [src_path],
+        "flow": {
+            "input": [q(roster, "명", "직원 명단"), q(records, "건", "수료 기록")],
+            "output": [q(drafts, "건", "독려 초안")],
+            "review": [q(len(check["rows"]), "건", "확인 필요 항목")],
+        },
+        "view": "training",
+        "detail": {
+            "courses": overall,
+            "groups": [{"name": label, "size": q(sum(size[d] for d in ds), "명"), "cells": [agg(c, ds) for c in courses]}
+                       for label, ds in groups],
+            "merge_note": f"대상 {MIN_GROUP}명 미만 부서({', '.join(merged)})는 개인 식별 방지를 위해 '{other}'로 합산" if merged else "",
+            "late_count": q(len(late), "건", "지연 (과정 기준)"),
+            "late_people": q(late_people, "명", "지연 실인원"),
+            "draft_count": q(drafts, "건", "독려 초안 (1인 1건)"),
+        },
     }
 
 
 def track_c():
     key = "fin-invoice"
-    src = f"{key}/report/대조.csv"
-    rows = list(csv.DictReader(io.StringIO(read(src))))
+    src_path = f"{key}/report/대조.csv"
+    summary_path = f"{key}/report/대조요약.md"
+    rows = list(csv.DictReader(io.StringIO(read(src_path))))
     order = ["일치", "금액 차이", "계산서 없음"]
     unknown = {r["판정"] for r in rows} - set(order)
     if unknown:
         raise ValueError(f"알 수 없는 판정: {unknown}")
     n = lambda v: int(v) if v.strip() else 0
-    by = {s: [r for r in rows if r["판정"] == s] for s in order}
-    stat = {s: {"count": len(rs), "supply": sum(n(r["공급가액"]) for r in rs),
-                "invoice": sum(n(r["계산서금액"]) for r in rs), "diff": sum(n(r["차액"]) for r in rs)}
-            for s, rs in by.items()}
-    tot = {k: sum(v[k] for v in stat.values()) for k in ("count", "supply", "invoice", "diff")}
-    mismatch = stat["금액 차이"]["count"] + stat["계산서 없음"]["count"]
+    verdicts = []
+    for s in order:
+        rs = [r for r in rows if r["판정"] == s]
+        verdicts.append({"name": s, "count": q(len(rs), "건"),
+                         "supply": q(sum(n(r["공급가액"]) for r in rs), "원"),
+                         "invoice": q(sum(n(r["계산서금액"]) for r in rs), "원"),
+                         "diff": q(sum(n(r["차액"]) for r in rs), "원")})
+    total = {k: q(sum(v[k]["value"] for v in verdicts), "원") for k in ("supply", "invoice", "diff")}
+    mismatch_rows = [r for r in rows if r["판정"] != "일치"]
+    drafts = count_drafts(key, "확인요청_*.md")
+    invoices = source_count(read(summary_path), "세금계산서.csv", "건")
     return {
-        "id": "C", "key": key, "name": "재무 · 구매", "desc": "발주 · 세금계산서 대조",
-        "sources": [src],
-        "kpis": [
-            {"label": "발주", "value": f"{tot['count']}건", "sub": f"계산서 대응 {sum(1 for r in rows if r['계산서번호'])}건"},
-            {"label": "일치", "value": f"{stat['일치']['count']}건", "tone": "good"},
-            {"label": "불일치", "value": f"{mismatch}건", "sub": f"확인 요청 초안 {count_drafts(key, '확인요청_*.md')}건", "tone": "warn"},
-            {"label": "차액 합계", "value": signed_won(tot["diff"]), "sub": "계산서 − 공급가액"},
-        ],
-        "charts": [{"type": "status", "title": "판정 구성",
-                    "items": [{"name": s, "count": stat[s]["count"]} for s in order]}],
-        "tables": [{
-            "title": "판정별 집계",
-            "headers": ["판정", "건수", "공급가액", "계산서 금액", "차액"],
-            "align": ["left", "right", "right", "right", "right"],
-            "status_col": 0,
-            "rows": [[s, f"{v['count']}건", won(v["supply"]), won(v["invoice"]), signed_won(v["diff"])] for s, v in stat.items()],
-            "total": ["합계", f"{tot['count']}건", won(tot["supply"]), won(tot["invoice"]), signed_won(tot["diff"])],
-        }],
+        "id": "C", "key": key, "name": "재무 · 구매", "task": "발주 · 세금계산서 대조",
+        "question": "자동 대조로 얼마나 맞았고, 어디가 어긋났는가",
+        "sources": [src_path, summary_path],
+        "flow": {
+            "input": [q(len(rows), "건", "발주"), q(invoices, "건", "세금계산서")],
+            "output": [q(len(rows), "건", "자동 판정"), q(drafts, "건", "확인 요청 초안")],
+            "review": [q(len(mismatch_rows), "건", "불일치")],
+        },
+        "view": "reconcile",
+        "detail": {
+            "verdicts": verdicts,
+            "total": total,
+            "mismatch": q(len(mismatch_rows), "건", "불일치 발주"),
+            "mismatch_vendors": q(len({r["거래처"] for r in mismatch_rows}), "곳", "불일치 거래처"),
+            "draft_count": q(drafts, "건", "확인 요청 초안 (거래처별)"),
+        },
     }
 
 
 def track_d():
     key = "ops-quality"
-    src = f"{key}/report/품질주간.md"
-    tables = md_tables(read(src))
+    src_path = f"{key}/report/품질주간.md"
+    action_path = f"{key}/report/조치요청초안.md"
+    tables = md_tables(read(src_path))
     by_type = find_table(tables, "유형", "보고 건수", "불량 수량")
     by_line = find_table(tables, "라인", "보고 건수", "불량 수량")
     pending = find_table(tables, "날짜", "라인", "유형", "원인", "조치 상태")
-
-    types = [r for r in by_type["rows"] if not is_total(r)]
-    lines = [r for r in by_line["rows"] if not is_total(r)]
-    total = next(r for r in by_type["rows"] if is_total(r))
+    total = total_row(by_type)
     reports, qty = to_num(total["보고 건수"]), to_num(total["불량 수량"])
+
     status = {}
     for r in pending["rows"]:
         status[r["조치 상태"]] = status.get(r["조치 상태"], 0) + 1
     done = reports - len(pending["rows"])
     no_cause = sum(1 for r in pending["rows"] if r["원인"] == "원인 미기재")
-    type_name = lambda s: re.sub(r"\s*\(.*\)$", "", s)  # 표기 메모는 빼고 유형명만
-    bar = lambda r, label: {"label": label, "value": to_num(r["불량 수량"]), "display": f"{to_num(r['불량 수량'])}개",
-                            "tip": f"{to_num(r['보고 건수'])}건 · {to_num(r['불량 수량'])}개"}
+
+    action = read(action_path)
+    basis = re.search(r"\*\*순위 기준:\*\*\s*(.+)", action).group(1)
+    prio = find_table(md_tables(action), "순위", "구분", "보고 건수", "불량 수량")
+    prio_groups = [{"name": r["구분"], "reports": q(to_num(r["보고 건수"]), "건"), "qty": q(to_num(r["불량 수량"]), "개")}
+                   for r in body_rows(prio)]
+    assert sum(g["reports"]["value"] for g in prio_groups) == reports, "D 정렬 그룹 합계 불일치"
+    messages = len(re.findall(r"^### 메시지 \d+", action, re.M))
+
+    dist = lambda t, fmt: [{"name": fmt(r), "reports": q(to_num(r["보고 건수"]), "건"), "qty": q(to_num(r["불량 수량"]), "개")}
+                           for r in body_rows(t)]
     return {
-        "id": "D", "key": key, "name": "품질 · IT 운영", "desc": "불량 보고 주간 요약",
-        "sources": [src],
-        "kpis": [
-            {"label": "불량 보고", "value": f"{reports}건"},
-            {"label": "불량 수량", "value": f"{qty}개"},
-            {"label": "미완료 조치", "value": f"{len(pending['rows'])}건", "sub": f"조치 완료 {done}건", "tone": "warn"},
-            {"label": "원인 미기재", "value": f"{no_cause}건", "tone": "warn" if no_cause else "good"},
-        ],
-        "charts": [
-            {"type": "bar", "title": "유형별 불량 수량", "items": [bar(r, type_name(r["유형"])) for r in types]},
-            {"type": "bar", "title": "라인별 불량 수량", "items": [bar(r, f"{r['라인']}라인") for r in lines]},
-        ],
-        "tables": [{
-            "title": "조치 상태별 집계",
-            "headers": ["조치 상태", "보고 건수"],
-            "align": ["left", "right"],
-            "rows": [[s, f"{c}건"] for s, c in status.items()] + [["조치 완료", f"{done}건"]],
-            "total": ["합계", f"{reports}건"],
-        }],
+        "id": "D", "key": key, "name": "품질 · IT 운영", "task": "불량 보고 주간 요약",
+        "question": "어떤 보고부터 확인해야 하고, 조치는 얼마나 진행됐는가",
+        "sources": [src_path, action_path],
+        "flow": {
+            "input": [q(reports, "건", "불량 보고"), q(qty, "개", "불량 수량")],
+            "output": [q(messages, "건", "조치 요청 메시지 (라인별)")],
+            "review": [q(len(pending["rows"]), "건", "미완료 조치"), q(no_cause, "건", "원인 미기재")],
+        },
+        "view": "quality",
+        "detail": {
+            "order_basis": [s.strip() for s in basis.split(">")],
+            "order_groups": prio_groups,
+            "status": [{"name": s, "reports": q(c, "건")} for s, c in status.items()] + [{"name": "조치 완료", "reports": q(done, "건")}],
+            "done": q(done, "건"), "reports": q(reports, "건"), "qty": q(qty, "개"),
+            "types": dist(by_type, lambda r: re.sub(r"\s*\(.*\)$", "", r["유형"])),
+            "lines": dist(by_line, lambda r: f"{r['라인']}라인"),
+        },
     }
 
 
@@ -301,9 +328,10 @@ def build():
         t["sources"].append(f"{t['key']}/report/검증결과.md")
         tracks.append(t)
     return {
+        "schema": 2,
         "title": "실습 결과 대시보드",
         "mode": "internal",
-        "notice": "내부 실습 결과입니다. 각 트랙 report/ 결과물의 집계이며 외부 공개용이 아닙니다.",
+        "notice": "내부 확인용 · 각 트랙 report/ 결과물의 집계이며 외부 공개용이 아닙니다.",
         "min_group": MIN_GROUP,
         "tracks": tracks,
     }
@@ -314,8 +342,7 @@ def main():
     ap.add_argument("--out", default=str(DEFAULT_OUT))
     out = Path(ap.parse_args().out)
     out.parent.mkdir(parents=True, exist_ok=True)
-    text = json.dumps(build(), ensure_ascii=False, indent=2) + "\n"
-    out.write_bytes(text.encode("utf-8"))
+    out.write_bytes((json.dumps(build(), ensure_ascii=False, indent=2) + "\n").encode("utf-8"))
     print(f"wrote {out}")
 
 

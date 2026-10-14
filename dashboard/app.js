@@ -2,8 +2,10 @@
 
 /*
  * 실습 결과 대시보드
- * - 화면은 data/dashboard.json(공개용 집계)만 읽는다. 각 트랙의 원문 파일은 읽지 않는다.
- * - data/dashboard.json은 tools/build_data.py가 report/ 결과물에서 생성한다.
+ * - 화면은 data/dashboard.json 한 파일만 읽는다 (내부: 실제 집계 / 공개: 가상 데모).
+ * - 화면 구성: 개요(#overview) + 트랙 상세(#A ~ #D). 트랙 상세는 업무별로 구성이 다르다.
+ * - 수치는 모두 {value, unit} 로 받아 단위를 붙여 표시한다. 화면에서 새 수치를 만들지 않고,
+ *   비율 · 합계처럼 데이터 안의 값으로 계산되는 것만 계산한다.
  */
 
 const DATA_URL = 'data/dashboard.json';
@@ -13,215 +15,295 @@ const DATA_URL = 'data/dashboard.json';
 const $ = (sel, el = document) => el.querySelector(sel);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
-/* ---------- Charts (HTML 막대) ---------- */
-
-const STATUS = {
-  '일치': { tone: 'good', icon: '✓', color: 'var(--good)' },
-  '금액 차이': { tone: 'serious', icon: '!', color: 'var(--serious)' },
-  '계산서 없음': { tone: 'critical', icon: '✕', color: 'var(--critical)' },
-};
-const statusPill = (v) => {
-  const s = STATUS[v];
-  return s ? `<span class="pill pill-${s.tone}">${s.icon} ${esc(v)}</span>` : esc(v);
-};
-
-const axisHtml = (ticks) => (ticks
-  ? `<div class="bar-axis"><span></span><div class="bar-axis-ticks">${ticks.map((t) => `<span>${esc(t)}</span>`).join('')}</div></div>`
-  : '');
-
-const barLine = (value, max, color, tip, display, grid) => `
-  <div class="bar-line">
-    <div class="bar-track${grid ? ' has-grid' : ''}">
-      <div class="bar-fill" style="width:${Math.max(0, (value / max) * 100)}%;background:${color}" data-tip="${esc(tip)}"></div>
-    </div>
-    <span class="bar-value">${esc(display)}</span>
-  </div>`;
-
-/** 단일 계열 가로 막대 */
-function barChart(c, max) {
-  const top = max ?? Math.max(...c.items.map((d) => d.value)) * 1.08;
-  const rows = c.items.map((d) => `
-    <div class="bar-row">
-      <div class="bar-label" title="${esc(d.label)}">${esc(d.label)}</div>
-      ${barLine(d.value, top, 'var(--series-1)', `<strong>${esc(d.label)}</strong>${esc(d.tip ?? d.display)}`, d.display, c.ticks)}
-    </div>`).join('');
-  const label = c.items.map((d) => `${d.label} ${d.display}`).join(', ');
-  return `<div class="bars" role="img" aria-label="${esc(`${c.title}: ${label}`)}">${rows}</div>${axisHtml(c.ticks)}`;
+/** {value, unit} → 표시 문자열. signed: 금액 차이처럼 부호를 붙인다. */
+function fmt(q, { signed = false } = {}) {
+  if (!q) return '-';
+  const { value, unit } = q;
+  if (unit === '%') return `${Number(value).toFixed(1)}%`;
+  const abs = Math.abs(value).toLocaleString('ko-KR');
+  const sign = signed ? (value > 0 ? '+' : value < 0 ? '−' : '') : (value < 0 ? '−' : '');
+  return `${sign}${abs}${unit}`;
 }
-
-/** 그룹 가로 막대 (계열 2개 이하) */
-function groupedBarChart(c) {
-  const color = (s) => `var(--series-${c.series.indexOf(s) + 1})`;
-  const legend = `<div class="legend">${c.series.map((s) => `<span class="legend-item"><span class="swatch" style="background:${color(s)}"></span>${esc(s)}</span>`).join('')}</div>`;
-  const rows = c.groups.map((g) => `
-    <div class="bar-row">
-      <div class="bar-label" title="${esc(g.label)}">${esc(g.label)}</div>
-      <div class="bar-stack">
-        ${g.values.map((v) => barLine(v.value, c.max, color(v.series), `<strong>${esc(g.label)} · ${esc(v.series)}</strong>${esc(v.tip ?? v.display)}`, v.display, c.ticks)).join('')}
-      </div>
-    </div>`).join('');
-  return `${legend}<div class="bars">${rows}</div>${axisHtml(c.ticks)}`;
-}
-
-/** 상태 구성 막대 + 아이콘 · 라벨 범례 */
-function statusChart(c) {
-  const total = c.items.reduce((a, b) => a + b.count, 0);
-  const segs = c.items.filter((d) => d.count > 0).map((d) => `<div class="stack-seg" style="flex:${d.count};background:${STATUS[d.name].color}"
-      data-tip="<strong>${esc(d.name)}</strong>${d.count}건 (${((d.count / total) * 100).toFixed(1)}%)"></div>`).join('');
-  const legend = c.items.map((d) => `
-    <div class="status-item">
-      <div class="status-name"><span class="status-icon" style="background:${STATUS[d.name].color}" aria-hidden="true">${STATUS[d.name].icon}</span>${esc(d.name)}</div>
-      <div class="status-count">${d.count}건</div>
-    </div>`).join('');
-  return `<div class="stack-bar" role="img" aria-label="${esc(c.items.map((d) => `${d.name} ${d.count}건`).join(', '))}">${segs}</div><div class="status-list">${legend}</div>`;
-}
-
-function chartHtml(c, sharedMax) {
-  if (c.type === 'grouped') return groupedBarChart(c);
-  if (c.type === 'status') return statusChart(c);
-  return barChart(c, sharedMax);
-}
-
-/* ---------- View pieces ---------- */
-
-function tableHtml(t) {
-  const cls = (i) => (t.align?.[i] === 'right' ? ' class="num"' : '');
-  const totals = new Set(t.total_rows ?? []);
-  const rows = [...t.rows.map((r, i) => [r, totals.has(i)]), ...(t.total ? [[t.total, true]] : [])];
-  const head = t.headers.map((h, i) => `<th${cls(i)} scope="col">${esc(h)}</th>`).join('');
-  const body = rows.map(([r, isTotal]) => `<tr${isTotal ? ' class="total"' : ''}>${r.map((v, i) =>
-    `<td${cls(i)}>${i === t.status_col && !isTotal ? statusPill(v) : esc(v)}</td>`).join('')}</tr>`).join('');
-  return `<div class="table-wrap"><table><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>`;
-}
-
-const kpiHtml = (k) => `
-  <div class="kpi${k.tone ? ` is-${k.tone}` : ''}">
-    <div class="kpi-label">${esc(k.label)}</div>
-    <div class="kpi-value">${esc(k.value)}</div>
-    ${k.sub ? `<div class="kpi-sub">${esc(k.sub)}</div>` : ''}
-  </div>`;
-
-const isDemo = () => DATA?.mode === 'demo';
-const demoChip = () => (isDemo() ? '<span class="chip-demo">예시 데이터</span>' : '');
-
-const card = (title, body) => `
-  <section class="card">
-    <div class="card-head"><h3>${esc(title)}</h3>${demoChip()}</div>
-    <div class="card-body">${body}</div>
-  </section>`;
-
-const verdictBadge = (v) => {
-  if (v === 'DEMO') return '<span class="badge badge-demo">예시</span>';
-  if (v === 'PASS') return '<span class="badge badge-pass">✓ PASS</span>';
-  return v ? `<span class="badge badge-fail">✕ ${esc(v)}</span>` : '<span class="badge badge-unknown">확인 불가</span>';
-};
-const resultPill = (r) => {
-  if (r === 'DEMO') return '<span class="pill pill-demo">예시</span>';
-  return r === 'PASS' ? '<span class="pill pill-good">✓ PASS</span>' : `<span class="pill pill-critical">✕ ${esc(r)}</span>`;
-};
-
-function verifyCard(v) {
-  const demo = v.final === 'DEMO';
-  const pass = v.final === 'PASS';
-  const rows = v.checks.map((c) => `
-    <tr>
-      <td>${esc(c.method)}</td>
-      <td>${resultPill(c.result)}</td>
-      <td class="num">${c.total ? `${c.passed} / ${c.total} 항목` : '-'}</td>
-    </tr>`).join('');
-  const summary = demo
-    ? `<div class="verify-summary demo">
-        <div class="verify-big">예시</div>
-        <div class="verify-meta">데모 화면입니다. 실제 검증 스크립트를 실행한 결과가 아닙니다.</div>
-      </div>`
-    : `<div class="verify-summary ${pass ? 'pass' : 'fail'}">
-        <div class="verify-big">${pass ? '✓ PASS' : `✕ ${esc(v.final || '결과 없음')}`}</div>
-        <div class="verify-meta">최종 결과 · 실행일 ${esc(v.run_date || '-')} · 기준일 ${esc(v.base_date || '-')}</div>
-      </div>`;
-  return card(demo ? '검증 결과 (예시)' : '검증 결과', `
-    ${summary}
-    <div class="table-wrap"><table>
-      <thead><tr><th scope="col">검증 방법</th><th scope="col">결과</th><th class="num" scope="col">통과 항목</th></tr></thead>
-      <tbody>${rows}</tbody>
-    </table></div>`);
-}
-
-/* ---------- Track view ---------- */
+const ratio = (a, b) => `${Number(a.value).toLocaleString('ko-KR')} / ${fmt(b)}`;
+const share = (part, whole) => (whole ? `${((part / whole) * 100).toFixed(1)}%` : '-');
 
 let DATA = null;
+const isDemo = () => DATA?.mode === 'demo';
+const trackById = (id) => DATA.tracks.find((t) => t.id === id);
 
-function renderTrack(id) {
-  const t = DATA.tracks.find((x) => x.id === id) || DATA.tracks[0];
-  document.querySelectorAll('.track-tab').forEach((b) => {
-    const on = b.dataset.id === t.id;
-    b.setAttribute('aria-selected', String(on));
-    b.tabIndex = on ? 0 : -1;
-  });
-  const bars = t.charts.filter((c) => c.type === 'bar');
-  const sharedMax = bars.length > 1 ? Math.max(...bars.flatMap((c) => c.items.map((d) => d.value))) * 1.08 : undefined;
-  const charts = t.charts.map((c, i) => `${i ? '<div class="chart-gap"></div>' : ''}<h4 class="chart-title">${esc(c.title)}</h4>${chartHtml(c, sharedMax)}`).join('');
-  const chartTitle = t.charts.length > 1 ? '현황 차트' : t.charts[0].title;
+/* ---------- Shared pieces ---------- */
 
-  $('#trackView').innerHTML = `
-    <div class="track-head">
-      <div>
-        <h2>${esc(t.id)} · ${esc(t.name)} — ${esc(t.desc)}</h2>
-        <div class="track-meta">${isDemo()
-          ? '<span>가상 예시 데이터</span><span>실제 실습 결과 아님</span>'
-          : `<span>기준일 ${esc(t.verify.base_date || '-')}</span><span>검증 실행일 ${esc(t.verify.run_date || '-')}</span>`}</div>
-      </div>
-      ${verdictBadge(t.verify.final)}
-    </div>
-    ${t.note ? `<p class="info" role="note"><span class="info-icon" aria-hidden="true">i</span>${esc(t.note)}</p>` : ''}
-    <div class="kpis">${t.kpis.map(kpiHtml).join('')}</div>
-    <div class="grid-2">
-      ${card(chartTitle, t.charts.length > 1 ? charts : chartHtml(t.charts[0]))}
-      ${verifyCard(t.verify)}
-    </div>
-    ${t.tables.map((tb) => card(tb.title, tableHtml(tb))).join('')}
-    <p class="sources">${isDemo()
-      ? '데이터 출처: 가상 데모 데이터 (저장소의 실습 결과물과 무관)'
-      : `집계 출처: ${t.sources.map((s) => `<code>${esc(s)}</code>`).join(' ')}`}</p>`;
+const STATUS = {
+  '일치': { icon: '✓', color: 'var(--good)' },
+  '금액 차이': { icon: '!', color: 'var(--serious)' },
+  '계산서 없음': { icon: '✕', color: 'var(--critical)' },
+  '조치 완료': { icon: '✓', color: 'var(--good)' },
+  '조치 중': { icon: '…', color: 'var(--neutral)' },
+  '조치 미기재': { icon: '!', color: 'var(--critical)' },
+};
+
+const meter = (value, max, tip) => `
+  <div class="meter" role="presentation"><div class="meter-fill" style="width:${max ? Math.max(0, (value / max) * 100) : 0}%"${tip ? ` data-tip="${esc(tip)}"` : ''}></div></div>`;
+
+const section = (title, body, note = '') => `
+  <section class="section">
+    <div class="section-head"><h2 class="section-title">${esc(title)}</h2>${note ? `<p class="section-note">${note}</p>` : ''}</div>
+    ${body}
+  </section>`;
+
+function flowStrip(flow) {
+  const step = (cls, label, items) => `
+    <div class="flow-step ${cls}">
+      <p class="flow-label">${label}</p>
+      <ul class="flow-items">${items.map((i) => `
+        <li class="flow-item"><span class="flow-value num">${esc(fmt(i))}</span><span class="flow-name">${esc(i.label)}</span></li>`).join('')}
+      </ul>
+    </div>`;
+  return `<div class="flow" aria-label="업무 흐름">
+    ${step('input', '입력', flow.input)}
+    ${step('output', '자동 산출', flow.output)}
+    ${step('review', '사람 확인 필요', flow.review)}
+  </div>`;
 }
 
-/* ---------- Data mode (데모 / 내부) ---------- */
-
-function showMode() {
-  const demo = isDemo();
-  document.documentElement.dataset.mode = demo ? 'demo' : 'internal';
-  if (demo) document.title = `${document.title} (데모)`;
-  $('#modeChip').textContent = demo ? 'DEMO · 예시 데이터' : '내부 실습 결과';
-  $('#modeChip').hidden = false;
-  const banner = $('#modeBanner');
-  banner.innerHTML = demo
-    ? `<strong>데모 데이터</strong><span>${esc(DATA.notice || '')}</span>`
-    : `<strong>내부 실습 결과</strong><span>${esc(DATA.notice || '')}</span>`;
-  banner.hidden = false;
+function verdictHtml(v) {
+  if (v.final === 'DEMO') return '<span class="verdict demo">예시</span>';
+  if (v.final === 'PASS') return '<span class="verdict pass">✓ PASS</span>';
+  return `<span class="verdict fail">✕ ${esc(v.final || '결과 없음')}</span>`;
 }
 
-/* ---------- Tabs ---------- */
+function verifyLine(v) {
+  if (v.final === 'DEMO') {
+    return `<div class="verify-line"><span class="label">검증</span>${verdictHtml(v)}</div>`;
+  }
+  const parts = [];
+  if (v.script) parts.push(`자동 검증 ${ratio(v.script.passed, v.script.total)}`);
+  if (v.factual) parts.push(`사실성 검토 ${esc(v.factual)}`);
+  return `<div class="verify-line">
+    <span class="label">검증</span>${verdictHtml(v)}
+    <span>${parts.map(esc).join(' · ')}</span>
+    <span class="meta">실행일 ${esc(v.run_date || '-')} · 기준일 ${esc(v.base_date || '-')}</span>
+  </div>`;
+}
 
-function buildTabs() {
-  const nav = $('#trackTabs');
-  nav.innerHTML = DATA.tracks.map((t) => `
-    <button type="button" class="track-tab" role="tab" data-id="${esc(t.id)}" aria-selected="false" aria-controls="trackView">
-      <span class="tab-top"><span class="tab-letter">TRACK ${esc(t.id)}</span>${verdictBadge(t.verify.final)}</span>
-      <span class="tab-name">${esc(t.name)}</span>
-      <span class="tab-desc">${esc(t.desc)}</span>
-    </button>`).join('');
-  nav.addEventListener('click', (e) => {
-    const b = e.target.closest('.track-tab');
-    if (b) location.hash = b.dataset.id;
+function stackBar(items, total, label) {
+  const segs = items.filter((d) => d.value > 0).map((d) => `<div class="stack-seg" style="flex:${d.value};background:${STATUS[d.name].color}"
+      data-tip="<strong>${esc(d.name)}</strong>${esc(d.text)} (${share(d.value, total)})"></div>`).join('');
+  const legend = items.map((d) => `
+    <li><span class="icon" style="background:${STATUS[d.name].color}" aria-hidden="true">${STATUS[d.name].icon}</span>
+      <span class="name">${esc(d.name)}</span><span class="count num">${esc(d.text)}</span><span class="share num">${share(d.value, total)}</span></li>`).join('');
+  return `<div class="stack" role="img" aria-label="${esc(`${label}: ${items.map((d) => `${d.name} ${d.text}`).join(', ')}`)}">${segs}</div>
+    <ul class="legend">${legend}</ul>`;
+}
+
+const linkLine = (from, to, ok, okText, gapText) => `
+  <div class="link-line">
+    <span>${from}</span><span class="arrow" aria-hidden="true">→</span><span>${to}</span>
+    <span class="ok">${ok ? `✓ ${esc(okText)}` : esc(gapText)}</span>
+  </div>`;
+
+/* ---------- Track views (업무별 구성) ---------- */
+
+const VIEWS = {
+  /* A 영업: 문의별 처리 목록 하나가 중심 (금액 · 품목 · 확인 필요 · 초안을 한 표에) */
+  quotes(t) {
+    const d = t.detail;
+    const max = Math.max(...d.inquiries.map((i) => i.amount.value));
+    const drafted = d.inquiries.filter((i) => i.draft).length;
+    const rows = d.inquiries.map((i) => `
+      <tr>
+        <td data-label="거래처">${esc(i.name)}</td>
+        <td class="num" data-label="품목">${esc(fmt(i.items))}</td>
+        <td data-label="견적 금액"><div class="inline-bar">${meter(i.amount.value, max, `${i.name} · ${fmt(i.amount)}`)}<span class="val num">${esc(fmt(i.amount))}</span></div></td>
+        <td class="num" data-label="확인 필요 품목">${i.review.value
+          ? `<span class="mark"><span class="dot" aria-hidden="true"></span>${esc(fmt(i.review))}</span>`
+          : `<span class="mark zero">${esc(fmt(i.review))}</span>`}</td>
+        <td data-label="회신 초안">${i.draft ? '작성' : '<strong>미작성</strong>'}</td>
+      </tr>`).join('');
+    const table = `<div class="block"><div class="table-wrap"><table class="stack-table">
+      <thead><tr><th scope="col">거래처</th><th class="num" scope="col">품목</th><th scope="col">견적 금액</th><th class="num" scope="col">확인 필요 품목</th><th scope="col">회신 초안</th></tr></thead>
+      <tbody>${rows}</tbody>
+      <tfoot><tr>
+        <td data-label="">합계</td>
+        <td class="num" data-label="품목">${esc(fmt(d.items_total))}</td>
+        <td data-label="견적 금액"><div class="inline-bar"><span class="val num" style="margin-left:auto">${esc(fmt(d.amount_total))}</span></div></td>
+        <td class="num" data-label="확인 필요 품목">${esc(fmt(d.items_review))}</td>
+        <td data-label="회신 초안">${drafted}건</td>
+      </tr></tfoot>
+    </table></div><p class="note">견적 금액: ${esc(d.amount_note)}</p></div>`;
+    return section('문의별 처리 현황', table, `품목 ${esc(fmt(d.items_total))} 중 견적 반영 ${esc(fmt(d.items_quoted))} · 확인 필요 ${esc(fmt(d.items_review))}`);
+  },
+
+  /* B 인사: 과정별 이수율 → 부서 × 과정 행렬 → 지연과 독려 초안 연결 */
+  training(t) {
+    const d = t.detail;
+    const courses = d.courses.map((c) => `
+      <div class="course">
+        <p class="course-name">${esc(c.course)}</p>
+        <p class="course-rate num">${esc(fmt(c.rate))}</p>
+        ${meter(c.rate.value, 100, `${c.course} · ${fmt(c.rate)}`)}
+        <p class="course-sub">이수 ${esc(fmt(c.done))} / 대상 ${esc(fmt(c.target))} · 미이수 ${esc(fmt({ value: c.target.value - c.done.value, unit: '명' }))}</p>
+      </div>`).join('');
+    const head = d.courses.map((c) => `<th scope="col">${esc(c.course)}</th>`).join('');
+    const rows = d.groups.map((g) => `
+      <tr><th scope="row">${esc(g.name)}<div class="cell-sub" style="font-weight:400">대상 ${esc(fmt(g.size))}</div></th>
+        ${g.cells.map((c) => `<td><div class="cell">
+          <div class="cell-top"><strong class="num">${esc(fmt(c.rate))}</strong><span class="cell-sub num">${c.done.value}/${esc(fmt(c.target))}</span></div>
+          ${meter(c.rate.value, 100, `${g.name} · ${c.course} · ${fmt(c.rate)}`)}
+        </div></td>`).join('')}
+      </tr>`).join('');
+    const matrix = `<div class="block"><div class="table-wrap"><table class="matrix">
+        <thead><tr><th scope="col">부서</th>${head}</tr></thead><tbody>${rows}</tbody>
+      </table></div>${d.merge_note ? `<p class="note">${esc(d.merge_note)}</p>` : ''}</div>`;
+    const ok = d.draft_count.value === d.late_people.value;
+    return section('과정별 이수율', `<div class="course-grid">${courses}</div>`)
+      + section('부서별 이수율', matrix)
+      + linkLine(
+        `지연 <strong class="num">${esc(fmt(d.late_count))}</strong> (과정 기준) · 실인원 <strong class="num">${esc(fmt(d.late_people))}</strong>`,
+        `독려 초안 <strong class="num">${esc(fmt(d.draft_count))}</strong> (1인 1건)`,
+        ok, '지연 실인원 전원 초안 작성', `초안 수와 지연 실인원이 다릅니다 — 확인 필요`);
+  },
+
+  /* C 재무 · 구매: 판정 구성 막대 → 판정별 금액표 → 불일치와 확인 요청 연결 */
+  reconcile(t) {
+    const d = t.detail;
+    const total = d.verdicts.reduce((a, v) => a + v.count.value, 0);
+    const bar = stackBar(d.verdicts.map((v) => ({ name: v.name, value: v.count.value, text: fmt(v.count) })), total, '판정 구성');
+    const rows = d.verdicts.map((v) => `
+      <tr>
+        <td data-label="판정"><span class="mark"><span class="dot" style="background:${STATUS[v.name].color}" aria-hidden="true"></span>${esc(v.name)}</span></td>
+        <td class="num" data-label="공급가액">${esc(fmt(v.supply))}</td><td class="num" data-label="계산서 금액">${esc(fmt(v.invoice))}</td><td class="num" data-label="차액">${esc(fmt(v.diff, { signed: true }))}</td>
+      </tr>`).join('');
+    const table = `<div class="block"><div class="table-wrap"><table class="stack-table">
+      <thead><tr><th scope="col">판정</th><th class="num" scope="col">공급가액</th><th class="num" scope="col">계산서 금액</th><th class="num" scope="col">차액</th></tr></thead>
+      <tbody>${rows}</tbody>
+      <tfoot><tr><td>합계</td><td class="num" data-label="공급가액">${esc(fmt(d.total.supply))}</td><td class="num" data-label="계산서 금액">${esc(fmt(d.total.invoice))}</td><td class="num" data-label="차액">${esc(fmt(d.total.diff, { signed: true }))}</td></tr></tfoot>
+    </table></div><p class="note">차액 = 계산서 금액 − 공급가액 · 계산서 없음은 차액 계산에서 제외</p></div>`;
+    const ok = d.draft_count.value === d.mismatch_vendors.value;
+    return section('판정 구성', `<div class="block">${bar}</div>`, `발주 ${esc(fmt({ value: total, unit: '건' }))} 자동 판정`)
+      + section('판정별 금액', table)
+      + linkLine(
+        `불일치 <strong class="num">${esc(fmt(d.mismatch))}</strong> · 거래처 <strong class="num">${esc(fmt(d.mismatch_vendors))}</strong>`,
+        `확인 요청 초안 <strong class="num">${esc(fmt(d.draft_count))}</strong> (거래처별)`,
+        ok, '불일치 거래처 전부 초안 작성', '초안 수와 불일치 거래처 수가 다릅니다 — 확인 필요');
+  },
+
+  /* D 품질 · IT: 확인 순서(정렬 기준) → 조치 진행 → 불량 분포 */
+  quality(t) {
+    const d = t.detail;
+    const basis = d.order_basis.map((b, i) => `${i ? '<span class="gt" aria-hidden="true">›</span>' : ''}<span class="chip">${esc(b)}</span>`).join('');
+    const items = d.order_groups.map((g) => `
+      <li class="order-item">
+        <div><p class="order-name">${esc(g.name)}</p><p class="order-count">보고 ${esc(fmt(g.reports))} · 불량 ${esc(fmt(g.qty))}</p></div>
+        <div class="order-bar">${meter(g.qty.value, d.qty.value, `${g.name} · 불량 ${fmt(g.qty)} (${share(g.qty.value, d.qty.value)})`)}</div>
+      </li>`).join('');
+    const order = `<div class="block">
+        <div class="order-basis"><span>정렬 기준</span>${basis}</div>
+        <ol class="order-list">${items}</ol>
+        <p class="note">확인 필요 보고를 살펴볼 순서입니다. 보고서의 정렬 기준을 따른 것이며, 원인이나 책임을 확정한 판정이 아닙니다.</p>
+      </div>`;
+    const status = stackBar(d.status.map((s) => ({ name: s.name, value: s.reports.value, text: fmt(s.reports) })), d.reports.value, '조치 상태');
+    const max = Math.max(...d.types.map((x) => x.qty.value), ...d.lines.map((x) => x.qty.value));
+    const list = (title, rows) => `<div class="block"><p class="dist-title">${esc(title)}</p><ul class="bar-list">${rows.map((r) => `
+        <li><span>${esc(r.name)}</span>${meter(r.qty.value, max, `${r.name} · 불량 ${fmt(r.qty)} · 보고 ${fmt(r.reports)}`)}
+          <span class="val num">${esc(fmt(r.qty))} <small>${esc(fmt(r.reports))}</small></span></li>`).join('')}</ul></div>`;
+    return section('확인 순서', order, '정렬 기준 · 확정 판정 아님')
+      + section('조치 진행', `<div class="block">${status}</div>`, `조치 완료 ${esc(fmt(d.done))} / 보고 ${esc(fmt(d.reports))}`)
+      + section('불량 분포', `<div class="dist-grid">${list('유형별 불량 수량', d.types)}${list('라인별 불량 수량', d.lines)}</div>`, '막대: 불량 수량(개) · 작은 글씨: 보고 건수');
+  },
+};
+
+/* ---------- Screens ---------- */
+
+function renderOverview() {
+  const tracks = DATA.tracks;
+  let status;
+  if (isDemo()) {
+    status = `<div class="status-line"><span>${esc(DATA.notice)}</span></div>`;
+  } else {
+    const pass = tracks.filter((t) => t.verify.final === 'PASS').length;
+    const scripted = tracks.filter((t) => t.verify.script);
+    const passed = scripted.reduce((a, t) => a + t.verify.script.passed.value, 0);
+    const total = scripted.reduce((a, t) => a + t.verify.script.total.value, 0);
+    const dates = (k) => [...new Set(tracks.map((t) => t.verify[k]).filter(Boolean))].join(', ');
+    status = `<div class="status-line">
+      <strong>${pass === tracks.length ? '✓ ' : ''}자동 검증 PASS ${pass} / ${tracks.length}개 트랙</strong>
+      <span>통과 ${passed.toLocaleString('ko-KR')} / ${total.toLocaleString('ko-KR')}항목</span>
+      <span class="sep">기준일 ${esc(dates('base_date'))} · 실행일 ${esc(dates('run_date'))}</span>
+    </div>`;
+  }
+  const cards = tracks.map((t) => {
+    const list = (items) => items.map((i) => `<span>${esc(i.label)} ${esc(fmt(i))}</span>`).join('');
+    const v = t.verify;
+    const verify = v.final === 'DEMO' ? verdictHtml(v)
+      : `${verdictHtml(v)}${v.script ? ` <span class="num" style="font-weight:400">${esc(ratio(v.script.passed, v.script.total))}</span>` : ''}`;
+    return `<a class="track-card" href="#${esc(t.id)}">
+      <div><p class="eyebrow">TRACK ${esc(t.id)} · ${esc(t.name)}</p><h2 class="track-card-title">${esc(t.task)}</h2></div>
+      <dl class="facts">
+        <dt>입력</dt><dd>${list(t.flow.input)}</dd>
+        <dt>자동 산출</dt><dd>${list(t.flow.output)}</dd>
+        <dt>사람 확인</dt><dd>${list(t.flow.review)}</dd>
+        <dt>검증</dt><dd>${verify}</dd>
+      </dl>
+      <span class="text-cta">자세히 보기</span>
+    </a>`;
+  }).join('');
+  return `
+    <p class="eyebrow">개요</p>
+    <h1 class="page-title">업무 자동화 실습 결과</h1>
+    <p class="page-lead">4개 업무에서 자동화가 처리한 일과, 사람이 판단해야 할 일을 정리했습니다.</p>
+    ${status}
+    <div class="track-grid">${cards}</div>`;
+}
+
+function renderTrack(t) {
+  const ids = DATA.tracks.map((x) => x.id);
+  const i = ids.indexOf(t.id);
+  const prev = i > 0 ? DATA.tracks[i - 1] : null;
+  const next = i < ids.length - 1 ? DATA.tracks[i + 1] : null;
+  return `
+    <p class="eyebrow">TRACK ${esc(t.id)} · ${esc(t.name)}</p>
+    <h1 class="page-title">${esc(t.task)}</h1>
+    <p class="page-lead">${esc(t.question)}</p>
+    ${flowStrip(t.flow)}
+    ${VIEWS[t.view](t)}
+    ${verifyLine(t.verify)}
+    <nav class="pager" aria-label="트랙 이동">
+      ${prev ? `<a class="btn-outline" href="#${esc(prev.id)}">← ${esc(prev.id)} ${esc(prev.name)}</a>` : '<a class="btn-outline" href="#overview">← 개요</a>'}
+      ${next ? `<a class="btn-outline next" href="#${esc(next.id)}">${esc(next.id)} ${esc(next.name)} →</a>` : '<a class="btn-outline next" href="#overview">개요 →</a>'}
+    </nav>`;
+}
+
+function renderFooter(t) {
+  if (isDemo()) return '정적 페이지 · <code>data/dashboard.json</code> 한 파일만 읽습니다.';
+  const src = t ? t.sources.map((s) => `<code>${esc(s)}</code>`).join(' ') : '각 트랙 <code>report/</code> 결과물';
+  return `${esc(DATA.notice)}<br>집계 출처: ${src} · 개인 · 거래 단위 내역과 원문 제외${DATA.min_group ? ` · 대상 ${DATA.min_group}명 미만 부서는 합산` : ''}`;
+}
+
+/* ---------- Navigation ---------- */
+
+function buildNav() {
+  const items = [{ id: 'overview', label: '개요' }, ...DATA.tracks.map((t) => ({ id: t.id, label: `${t.id} ${t.name}` }))];
+  $('#gnb').innerHTML = items.map((n) => `<li><a class="gnb-link" href="#${esc(n.id)}" data-route="${esc(n.id)}">${esc(n.label)}</a></li>`).join('');
+}
+
+function route(focus) {
+  const id = decodeURIComponent(location.hash.slice(1)) || 'overview';
+  const t = trackById(id.toUpperCase());
+  const current = t ? t.id : 'overview';
+  document.querySelectorAll('.gnb-link').forEach((a) => {
+    if (a.dataset.route === current) a.setAttribute('aria-current', 'page');
+    else a.removeAttribute('aria-current');
   });
-  nav.addEventListener('keydown', (e) => {
-    if (!['ArrowLeft', 'ArrowRight'].includes(e.key)) return;
-    const tabs = [...nav.querySelectorAll('.track-tab')];
-    const i = tabs.indexOf(document.activeElement);
-    if (i < 0) return;
-    const next = tabs[(i + (e.key === 'ArrowRight' ? 1 : tabs.length - 1)) % tabs.length];
-    next.focus();
-    location.hash = next.dataset.id;
-  });
+  const active = $(`.gnb-link[data-route="${current}"]`);
+  if (active) active.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+  $('#view').innerHTML = t ? renderTrack(t) : renderOverview();
+  $('#footer').innerHTML = renderFooter(t);
+  document.title = `${t ? `${t.id} ${t.name} · ` : ''}실습 결과 대시보드${isDemo() ? ' (데모)' : ''}`;
+  if (focus) {
+    window.scrollTo(0, 0);
+    $('#main').focus({ preventScroll: true });
+  }
 }
 
 /* ---------- Tooltip ---------- */
@@ -242,39 +324,29 @@ function initTooltip() {
   });
 }
 
-/* ---------- Theme ---------- */
-
-function initTheme() {
-  const root = document.documentElement;
-  try { const saved = localStorage.getItem('dash-theme'); if (saved) root.dataset.theme = saved; } catch { /* 저장소 사용 불가 */ }
-  $('#themeToggle').addEventListener('click', () => {
-    const dark = root.dataset.theme ? root.dataset.theme === 'dark' : matchMedia('(prefers-color-scheme: dark)').matches;
-    root.dataset.theme = dark ? 'light' : 'dark';
-    try { localStorage.setItem('dash-theme', root.dataset.theme); } catch { /* 무시 */ }
-  });
-}
-
 /* ---------- Boot ---------- */
 
 async function boot() {
-  initTheme();
   initTooltip();
   try {
     const res = await fetch(DATA_URL, { cache: 'no-cache' });
     if (!res.ok) throw new Error(`${DATA_URL} (HTTP ${res.status})`);
     DATA = await res.json();
+    if (DATA.schema !== 2) throw new Error('데이터 구조 버전이 맞지 않습니다 (schema 2 필요)');
   } catch (e) {
     const n = $('#notice');
     n.hidden = false;
     n.innerHTML = `데이터를 불러오지 못했습니다: ${esc(e.message)}<br>파일을 직접 열면(file://) 브라우저가 읽기를 막습니다. <code>dashboard</code> 폴더에서 <code>python -m http.server 8000</code> 실행 후 <code>http://localhost:8000/</code>으로 여세요.`;
-    $('#trackView').innerHTML = '';
+    $('#view').innerHTML = '';
     return;
   }
-  showMode();
-  buildTabs();
-  const route = () => renderTrack((location.hash.slice(1) || 'A').toUpperCase());
-  window.addEventListener('hashchange', route);
-  route();
+  const tag = $('#modeTag');
+  tag.textContent = isDemo() ? 'DEMO · 예시 데이터' : '내부 확인용';
+  tag.classList.toggle('demo', isDemo());
+  tag.hidden = false;
+  buildNav();
+  window.addEventListener('hashchange', () => route(true));
+  route(false);
 }
 
 boot();
