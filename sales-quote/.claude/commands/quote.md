@@ -1,7 +1,7 @@
 ---
 description: 견적 문의를 읽고 단가표로 단가를 찾아 회신 초안을 outbox/drafts/에 저장한 뒤 검증한다
 argument-hint: "[견적문의_NN | all]"
-allowed-tools: Bash(python scripts/verify.py), Read, Write, Edit, Glob, Grep
+allowed-tools: Bash(python scripts/verify.py), Bash(python tools/price_lookup.py:*), Bash(python3 tools/price_lookup.py:*), Read, Write, Edit, Glob, Grep
 ---
 
 # 견적 회신 초안 (Day 1 업무 도구)
@@ -21,10 +21,10 @@ allowed-tools: Bash(python scripts/verify.py), Read, Write, Edit, Glob, Grep
 
 ## 절차
 1. **문의 읽기:** `CLAUDE.md`와 대상 문의를 읽는다. 거래처, 받은 날짜, 품목·수량·단위를 뽑는다.
-2. **단가 찾기:** `data/단가표.csv`에서 품목명이 정확히 같은 행을 찾는다.
+2. **단가 찾기:** 품목마다 Bash 도구로 `python tools/price_lookup.py "<품목명>" <단위>`를 한 번씩 실행해 `data/단가표.csv`에서 품목명이 정확히 같은 행을 찾는다. 단가와 사유는 도구 출력을 그대로 쓴다.
    - 없으면 `단가표에 없는 품목`, 단위가 다르면 `단위 불분명` → `확인 필요`
    - 할인 요청은 적용하지 않고 `확인 필요`로 남긴다.
-3. **초안 작성:** `CLAUDE.md`의 A트랙 공식 형식으로 쓴다. 이미 초안이 있으면 그 구조를 따라 갱신한다.
+3. **초안 작성:** `CLAUDE.md`의 A트랙 공식 형식으로 쓴다. 1장 회신 메시지 문구는 `reply-rules` Skill을 따른다. 이미 초안이 있으면 그 구조를 따라 갱신한다.
 4. **저장:** `outbox/drafts/회신_<거래처>.md`에 저장한다.
 5. **검증:** `python scripts/verify.py`를 실행한다. 대상 문의의 항목이 FAIL이면 초안을 고친 뒤 다시 실행한다.
    - 처리하지 않은 문의나 `report/견적처리.md` 항목의 FAIL은 이 커맨드 범위 밖이다. 그대로 보고한다.
