@@ -92,12 +92,14 @@ def track_b():
 
 def track_c():
     # 판정별 (건수, 공급가액, 계산서 금액)
-    stat = {"일치": (11, 9600000, 9600000), "금액 차이": (3, 3200000, 3080000), "계산서 없음": (1, 700000, 0)}
-    verdicts = [{"name": s, "count": q(c, "건"), "supply": q(sp, "원"), "invoice": q(iv, "원"),
-                 "diff": q(iv - sp if s != "계산서 없음" else 0, "원")} for s, (c, sp, iv) in stat.items()]
+    # 판정별 (건수, 거래처 수, 공급가액, 계산서 금액)
+    stat = {"일치": (11, 6, 9600000, 9600000), "금액 차이": (3, 3, 3200000, 3080000), "계산서 없음": (1, 1, 700000, 0)}
+    verdicts = [{"name": s, "count": q(c, "건"), "vendors": q(v, "곳"), "supply": q(sp, "원"), "invoice": q(iv, "원"),
+                 "diff": q(iv - sp if s != "계산서 없음" else 0, "원")} for s, (c, v, sp, iv) in stat.items()]
     total = {k: q(sum(v[k]["value"] for v in verdicts), "원") for k in ("supply", "invoice", "diff")}
     po = sum(v["count"]["value"] for v in verdicts)
     mismatch = po - stat["일치"][0]
+    mismatch_vendors = stat["금액 차이"][1] + stat["계산서 없음"][1]
     return {
         "id": "C", "key": "fin-invoice", "name": "재무 · 구매", "task": "발주 · 세금계산서 대조",
         "question": "자동 대조로 얼마나 맞았고, 어디가 어긋났는가",
@@ -111,19 +113,26 @@ def track_c():
             "verdicts": verdicts,
             "total": total,
             "mismatch": q(mismatch, "건", "불일치 발주"),
-            "mismatch_vendors": q(4, "곳", "불일치 거래처"),
+            "mismatch_vendors": q(mismatch_vendors, "곳", "불일치 거래처"),
             "draft_count": q(4, "건", "확인 요청 초안 (거래처별)"),
         },
     }
 
 
 def track_d():
-    types = [("이물 혼입", 4, 21), ("치수 불량", 2, 17), ("도장 불량", 2, 14)]
-    lines = [("가라인", 3, 22), ("나라인", 3, 16), ("다라인", 2, 14)]
+    # 라인 × 유형 칸 (라인, 유형, 보고 건수, 불량 수량) → 유형별 · 라인별 합계는 여기서 계산
+    cells = [("가라인", "이물 혼입", 2, 15), ("가라인", "도장 불량", 1, 7),
+             ("나라인", "치수 불량", 2, 11), ("나라인", "이물 혼입", 1, 5),
+             ("다라인", "이물 혼입", 1, 4), ("다라인", "도장 불량", 1, 11)]
+    total_of = lambda idx, name: (sum(c[2] for c in cells if c[idx] == name), sum(c[3] for c in cells if c[idx] == name))
+    types = [(t, *total_of(1, t)) for t in ("이물 혼입", "치수 불량", "도장 불량")]
+    lines = [(l, *total_of(0, l)) for l in ("가라인", "나라인", "다라인")]
+    daily = [("07-06", 2, 14), ("07-07", 1, 6), ("07-08", 2, 11), ("07-09", 1, 8), ("07-10", 2, 14)]
     status = [("조치 중", 4), ("조치 미기재", 1), ("조치 완료", 3)]
-    groups = [("기록 누락", 2, 15), ("반복 원인", 3, 21), ("반복 유형", 3, 16)]
+    groups = [("기록 누락", 2, 15), ("반복 원인", 3, 21), ("반복 유형", 3, 17)]
     reports = sum(t[1] for t in types)
     qty = sum(t[2] for t in types)
+    assert reports == sum(d[1] for d in daily) and qty == sum(d[2] for d in daily)
     assert reports == sum(x[1] for x in lines) == sum(x[1] for x in status) == sum(g[1] for g in groups)
     assert qty == sum(x[2] for x in lines) == sum(g[2] for g in groups)
     done = dict(status)["조치 완료"]
@@ -144,6 +153,8 @@ def track_d():
             "done": q(done, "건"), "reports": q(reports, "건"), "qty": q(qty, "개"),
             "types": dist(types),
             "lines": dist(lines),
+            "daily": [{"date": d, "reports": q(r, "건"), "qty": q(c, "개")} for d, r, c in daily],
+            "matrix": [{"line": l, "type": t, "reports": q(r, "건"), "qty": q(c, "개")} for l, t, r, c in sorted(cells)],
         },
     }
 

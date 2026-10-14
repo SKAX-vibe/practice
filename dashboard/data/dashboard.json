@@ -414,6 +414,10 @@
               "value": 7,
               "unit": "건"
             },
+            "vendors": {
+              "value": 5,
+              "unit": "곳"
+            },
             "supply": {
               "value": 6350000,
               "unit": "원"
@@ -433,6 +437,10 @@
               "value": 2,
               "unit": "건"
             },
+            "vendors": {
+              "value": 2,
+              "unit": "곳"
+            },
             "supply": {
               "value": 4250000,
               "unit": "원"
@@ -451,6 +459,10 @@
             "count": {
               "value": 1,
               "unit": "건"
+            },
+            "vendors": {
+              "value": 1,
+              "unit": "곳"
             },
             "supply": {
               "value": 540000,
@@ -702,6 +714,113 @@
             },
             "qty": {
               "value": 13,
+              "unit": "개"
+            }
+          }
+        ],
+        "daily": [
+          {
+            "date": "06-08",
+            "reports": {
+              "value": 1,
+              "unit": "건"
+            },
+            "qty": {
+              "value": 12,
+              "unit": "개"
+            }
+          },
+          {
+            "date": "06-09",
+            "reports": {
+              "value": 1,
+              "unit": "건"
+            },
+            "qty": {
+              "value": 5,
+              "unit": "개"
+            }
+          },
+          {
+            "date": "06-10",
+            "reports": {
+              "value": 1,
+              "unit": "건"
+            },
+            "qty": {
+              "value": 7,
+              "unit": "개"
+            }
+          },
+          {
+            "date": "06-11",
+            "reports": {
+              "value": 1,
+              "unit": "건"
+            },
+            "qty": {
+              "value": 9,
+              "unit": "개"
+            }
+          },
+          {
+            "date": "06-12",
+            "reports": {
+              "value": 2,
+              "unit": "건"
+            },
+            "qty": {
+              "value": 7,
+              "unit": "개"
+            }
+          }
+        ],
+        "matrix": [
+          {
+            "line": "A라인",
+            "type": "스크래치",
+            "reports": {
+              "value": 2,
+              "unit": "건"
+            },
+            "qty": {
+              "value": 19,
+              "unit": "개"
+            }
+          },
+          {
+            "line": "B라인",
+            "type": "치수 불량",
+            "reports": {
+              "value": 2,
+              "unit": "건"
+            },
+            "qty": {
+              "value": 8,
+              "unit": "개"
+            }
+          },
+          {
+            "line": "C라인",
+            "type": "도장 불량",
+            "reports": {
+              "value": 1,
+              "unit": "건"
+            },
+            "qty": {
+              "value": 9,
+              "unit": "개"
+            }
+          },
+          {
+            "line": "C라인",
+            "type": "스크래치",
+            "reports": {
+              "value": 1,
+              "unit": "건"
+            },
+            "qty": {
+              "value": 4,
               "unit": "개"
             }
           }

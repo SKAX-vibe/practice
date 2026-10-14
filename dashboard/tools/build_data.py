@@ -244,7 +244,7 @@ def track_c():
     verdicts = []
     for s in order:
         rs = [r for r in rows if r["판정"] == s]
-        verdicts.append({"name": s, "count": q(len(rs), "건"),
+        verdicts.append({"name": s, "count": q(len(rs), "건"), "vendors": q(len({r["거래처"] for r in rs}), "곳"),
                          "supply": q(sum(n(r["공급가액"]) for r in rs), "원"),
                          "invoice": q(sum(n(r["계산서금액"]) for r in rs), "원"),
                          "diff": q(sum(n(r["차액"]) for r in rs), "원")})
@@ -297,6 +297,23 @@ def track_d():
     assert sum(g["reports"]["value"] for g in prio_groups) == reports, "D 정렬 그룹 합계 불일치"
     messages = len(re.findall(r"^### 메시지 \d+", action, re.M))
 
+    # 보고 건별 내역(2-2): 날짜 · 라인 · 유형 · 수량. 개수와 수량만 집계한다 (원인 등 내용은 넣지 않음).
+    per_report = find_table(md_tables(action), "순위", "날짜", "라인", "유형", "수량")["rows"]
+    type_of = lambda r: re.sub(r"\s*\(.*\)$", "", r["유형"])
+    assert len(per_report) == reports and sum(to_num(r["수량"]) for r in per_report) == qty, "D 보고 건별 내역 합계 불일치"
+    dates = sorted({r["날짜"] for r in per_report})
+    cells = {}
+    for r in per_report:
+        c = cells.setdefault((f"{r['라인']}라인", type_of(r)), [0, 0])
+        c[0] += 1
+        c[1] += to_num(r["수량"])
+    matrix = [{"line": l, "type": t, "reports": q(n, "건"), "qty": q(v, "개")} for (l, t), (n, v) in sorted(cells.items())]
+    for key_, rows_, name_ in (("line", by_line, lambda r: f"{r['라인']}라인"), ("type", by_type, type_of)):
+        for r in body_rows(rows_):
+            assert sum(m["qty"]["value"] for m in matrix if m[key_] == name_(r)) == to_num(r["불량 수량"]), f"D 행렬 {key_} 합계 불일치"
+    daily = [{"date": d, "reports": q(sum(1 for r in per_report if r["날짜"] == d), "건"),
+              "qty": q(sum(to_num(r["수량"]) for r in per_report if r["날짜"] == d), "개")} for d in dates]
+
     dist = lambda t, fmt: [{"name": fmt(r), "reports": q(to_num(r["보고 건수"]), "건"), "qty": q(to_num(r["불량 수량"]), "개")}
                            for r in body_rows(t)]
     return {
@@ -316,6 +333,8 @@ def track_d():
             "done": q(done, "건"), "reports": q(reports, "건"), "qty": q(qty, "개"),
             "types": dist(by_type, lambda r: re.sub(r"\s*\(.*\)$", "", r["유형"])),
             "lines": dist(by_line, lambda r: f"{r['라인']}라인"),
+            "daily": daily,
+            "matrix": matrix,
         },
     }
 

@@ -429,6 +429,10 @@
               "value": 11,
               "unit": "건"
             },
+            "vendors": {
+              "value": 6,
+              "unit": "곳"
+            },
             "supply": {
               "value": 9600000,
               "unit": "원"
@@ -448,6 +452,10 @@
               "value": 3,
               "unit": "건"
             },
+            "vendors": {
+              "value": 3,
+              "unit": "곳"
+            },
             "supply": {
               "value": 3200000,
               "unit": "원"
@@ -466,6 +474,10 @@
             "count": {
               "value": 1,
               "unit": "건"
+            },
+            "vendors": {
+              "value": 1,
+              "unit": "곳"
             },
             "supply": {
               "value": 700000,
@@ -531,7 +543,7 @@
           },
           {
             "label": "불량 수량",
-            "value": 52,
+            "value": 53,
             "unit": "개"
           }
         ],
@@ -593,7 +605,7 @@
               "unit": "건"
             },
             "qty": {
-              "value": 16,
+              "value": 17,
               "unit": "개"
             }
           }
@@ -630,7 +642,7 @@
           "unit": "건"
         },
         "qty": {
-          "value": 52,
+          "value": 53,
           "unit": "개"
         },
         "types": [
@@ -641,7 +653,7 @@
               "unit": "건"
             },
             "qty": {
-              "value": 21,
+              "value": 24,
               "unit": "개"
             }
           },
@@ -652,7 +664,7 @@
               "unit": "건"
             },
             "qty": {
-              "value": 17,
+              "value": 11,
               "unit": "개"
             }
           },
@@ -663,7 +675,7 @@
               "unit": "건"
             },
             "qty": {
-              "value": 14,
+              "value": 18,
               "unit": "개"
             }
           }
@@ -698,7 +710,138 @@
               "unit": "건"
             },
             "qty": {
+              "value": 15,
+              "unit": "개"
+            }
+          }
+        ],
+        "daily": [
+          {
+            "date": "07-06",
+            "reports": {
+              "value": 2,
+              "unit": "건"
+            },
+            "qty": {
               "value": 14,
+              "unit": "개"
+            }
+          },
+          {
+            "date": "07-07",
+            "reports": {
+              "value": 1,
+              "unit": "건"
+            },
+            "qty": {
+              "value": 6,
+              "unit": "개"
+            }
+          },
+          {
+            "date": "07-08",
+            "reports": {
+              "value": 2,
+              "unit": "건"
+            },
+            "qty": {
+              "value": 11,
+              "unit": "개"
+            }
+          },
+          {
+            "date": "07-09",
+            "reports": {
+              "value": 1,
+              "unit": "건"
+            },
+            "qty": {
+              "value": 8,
+              "unit": "개"
+            }
+          },
+          {
+            "date": "07-10",
+            "reports": {
+              "value": 2,
+              "unit": "건"
+            },
+            "qty": {
+              "value": 14,
+              "unit": "개"
+            }
+          }
+        ],
+        "matrix": [
+          {
+            "line": "가라인",
+            "type": "도장 불량",
+            "reports": {
+              "value": 1,
+              "unit": "건"
+            },
+            "qty": {
+              "value": 7,
+              "unit": "개"
+            }
+          },
+          {
+            "line": "가라인",
+            "type": "이물 혼입",
+            "reports": {
+              "value": 2,
+              "unit": "건"
+            },
+            "qty": {
+              "value": 15,
+              "unit": "개"
+            }
+          },
+          {
+            "line": "나라인",
+            "type": "이물 혼입",
+            "reports": {
+              "value": 1,
+              "unit": "건"
+            },
+            "qty": {
+              "value": 5,
+              "unit": "개"
+            }
+          },
+          {
+            "line": "나라인",
+            "type": "치수 불량",
+            "reports": {
+              "value": 2,
+              "unit": "건"
+            },
+            "qty": {
+              "value": 11,
+              "unit": "개"
+            }
+          },
+          {
+            "line": "다라인",
+            "type": "도장 불량",
+            "reports": {
+              "value": 1,
+              "unit": "건"
+            },
+            "qty": {
+              "value": 11,
+              "unit": "개"
+            }
+          },
+          {
+            "line": "다라인",
+            "type": "이물 혼입",
+            "reports": {
+              "value": 1,
+              "unit": "건"
+            },
+            "qty": {
+              "value": 4,
               "unit": "개"
             }
           }

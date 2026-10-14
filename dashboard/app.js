@@ -86,14 +86,58 @@ function verifyLine(v) {
   </div>`;
 }
 
-function stackBar(items, total, label) {
-  const segs = items.filter((d) => d.value > 0).map((d) => `<div class="stack-seg" style="flex:${d.value};background:${STATUS[d.name].color}"
-      data-tip="<strong>${esc(d.name)}</strong>${esc(d.text)} (${share(d.value, total)})"></div>`).join('');
-  const legend = items.map((d) => `
-    <li><span class="icon" style="background:${STATUS[d.name].color}" aria-hidden="true">${STATUS[d.name].icon}</span>
-      <span class="name">${esc(d.name)}</span><span class="count num">${esc(d.text)}</span><span class="share num">${share(d.value, total)}</span></li>`).join('');
-  return `<div class="stack" role="img" aria-label="${esc(`${label}: ${items.map((d) => `${d.name} ${d.text}`).join(', ')}`)}">${segs}</div>
-    <ul class="legend">${legend}</ul>`;
+/** 그레이 단색 농도: t(0~1)가 클수록 진하게. 글자색은 배경에 맞춰 바꾼다. */
+function heatCell(t, inner, tip) {
+  const L = Math.round(96 - Math.max(0, Math.min(1, t)) * 70);
+  return `<td class="heat" style="background:hsl(0 0% ${L}%);color:${L < 47 ? '#fff' : '#000'}" data-tip="${esc(tip)}">${inner}</td>`;
+}
+const heatLegend = (lo, hi, label) => `
+  <div class="heat-legend" aria-hidden="true"><span>${esc(label)}</span><span>${esc(lo)}</span><span class="heat-ramp"></span><span>${esc(hi)}</span></div>`;
+
+/** 도넛: 조각 사이 2px 간격, 가운데 합계. 색은 상태 색이며 범례에 아이콘 · 라벨을 함께 둔다. */
+function donut(items, total, centerLabel, label) {
+  const r = 70, sw = 22, c = 2 * Math.PI * r, gap = 2;
+  let offset = 0;
+  const segs = items.filter((d) => d.value > 0).map((d) => {
+    const len = (d.value / total) * c;
+    const draw = Math.max(0, len - gap);
+    const seg = `<circle class="donut-seg" data-verdict="${esc(d.name)}" r="${r}" cx="90" cy="90" fill="none" stroke="${STATUS[d.name].color}" stroke-width="${sw}"
+      stroke-dasharray="${draw.toFixed(2)} ${(c - draw).toFixed(2)}" stroke-dashoffset="${(-offset).toFixed(2)}"
+      data-tip="<strong>${esc(d.name)}</strong>${esc(d.text)} (${share(d.value, total)})"></circle>`;
+    offset += len;
+    return seg;
+  }).join('');
+  return `<svg class="donut" viewBox="0 0 180 180" role="img" aria-label="${esc(`${label}: ${items.map((d) => `${d.name} ${d.text}`).join(', ')}`)}">
+      <g transform="rotate(-90 90 90)">${segs}</g>
+      <text x="90" y="88" text-anchor="middle" class="donut-total">${esc(fmt({ value: total, unit: '건' }))}</text>
+      <text x="90" y="112" text-anchor="middle" class="donut-label">${esc(centerLabel)}</text>
+    </svg>`;
+}
+
+/** C: 도넛 조각 · 범례 ↔ 불일치 상세 행 연결 (hover · 포커스 강조, 클릭 시 상세로 이동) */
+function linkVerdicts(root) {
+  const rows = (name) => root.querySelectorAll(`#mismatch-detail tr[data-verdict="${CSS.escape(name)}"]`);
+  const set = (name, on) => {
+    rows(name).forEach((r) => r.classList.toggle('is-hl', on));
+    root.querySelectorAll(`[data-verdict="${CSS.escape(name)}"]`).forEach((el) => el.classList.toggle('is-hl', on));
+  };
+  // 도넛 조각은 마우스 전용. SVG 요소에 포커스 이벤트를 달면 Chrome이 Tab 정지점으로 만들므로,
+  // 키보드 조작은 범례 버튼(포커스 · Enter · Space)이 맡는다.
+  const on = (el, name, events) => {
+    el.addEventListener(events[0], () => set(name, true));
+    el.addEventListener(events[1], () => set(name, false));
+  };
+  root.querySelectorAll('.donut-seg').forEach((el) => on(el, el.dataset.verdict, ['mouseenter', 'mouseleave']));
+  root.querySelectorAll('.legend-col li').forEach((el) => {
+    on(el, el.dataset.verdict, ['mouseenter', 'mouseleave']);
+    on(el, el.dataset.verdict, ['focusin', 'focusout']);
+  });
+  root.querySelectorAll('button.legend-link').forEach((b) => b.addEventListener('click', () => {
+    const r = rows(b.dataset.target)[0];
+    if (!r) return;
+    r.scrollIntoView({ behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'center' });
+    r.focus({ preventScroll: true });
+  }));
 }
 
 const linkLine = (from, to, ok, okText, gapText) => `
@@ -134,7 +178,7 @@ const VIEWS = {
     return section('문의별 처리 현황', table, `품목 ${esc(fmt(d.items_total))} 중 견적 반영 ${esc(fmt(d.items_quoted))} · 확인 필요 ${esc(fmt(d.items_review))}`);
   },
 
-  /* B 인사: 과정별 이수율 → 부서 × 과정 행렬 → 지연과 독려 초안 연결 */
+  /* B 인사: 과정별 이수율 → 부서 × 과정 히트맵 → 지연과 독려 초안 연결 */
   training(t) {
     const d = t.detail;
     const courses = d.courses.map((c) => `
@@ -146,70 +190,124 @@ const VIEWS = {
       </div>`).join('');
     const head = d.courses.map((c) => `<th scope="col">${esc(c.course)}</th>`).join('');
     const rows = d.groups.map((g) => `
-      <tr><th scope="row">${esc(g.name)}<div class="cell-sub" style="font-weight:400">대상 ${esc(fmt(g.size))}</div></th>
-        ${g.cells.map((c) => `<td><div class="cell">
-          <div class="cell-top"><strong class="num">${esc(fmt(c.rate))}</strong><span class="cell-sub num">${c.done.value}/${esc(fmt(c.target))}</span></div>
-          ${meter(c.rate.value, 100, `${g.name} · ${c.course} · ${fmt(c.rate)}`)}
-        </div></td>`).join('')}
+      <tr><th scope="row">${esc(g.name)}<span class="heat-sub">대상 ${esc(fmt(g.size))}</span></th>
+        ${g.cells.map((c) => heatCell(c.rate.value / 100, `<strong class="num">${esc(fmt(c.rate))}</strong><span class="heat-sub num">${c.done.value}/${esc(fmt(c.target))}</span>`,
+          `${g.name} · ${c.course} · ${fmt(c.rate)} (이수 ${fmt(c.done)} / 대상 ${fmt(c.target)})`)).join('')}
       </tr>`).join('');
-    const matrix = `<div class="block"><div class="table-wrap"><table class="matrix">
+    const heat = `<div class="block"><div class="table-wrap"><table class="heatmap">
         <thead><tr><th scope="col">부서</th>${head}</tr></thead><tbody>${rows}</tbody>
-      </table></div>${d.merge_note ? `<p class="note">${esc(d.merge_note)}</p>` : ''}</div>`;
+      </table></div>
+      ${heatLegend('0%', '100%', '이수율')}
+      ${d.merge_note ? `<p class="note">${esc(d.merge_note)}</p>` : ''}</div>`;
     const ok = d.draft_count.value === d.late_people.value;
     return section('과정별 이수율', `<div class="course-grid">${courses}</div>`)
-      + section('부서별 이수율', matrix)
+      + section('부서별 이수율', heat, '칸이 진할수록 이수율이 높음')
       + linkLine(
         `지연 <strong class="num">${esc(fmt(d.late_count))}</strong> (과정 기준) · 실인원 <strong class="num">${esc(fmt(d.late_people))}</strong>`,
         `독려 초안 <strong class="num">${esc(fmt(d.draft_count))}</strong> (1인 1건)`,
-        ok, '지연 실인원 전원 초안 작성', `초안 수와 지연 실인원이 다릅니다 — 확인 필요`);
+        ok, '지연 실인원 전원 초안 작성', '초안 수와 지연 실인원이 다릅니다 — 확인 필요');
   },
 
-  /* C 재무 · 구매: 판정 구성 막대 → 판정별 금액표 → 불일치와 확인 요청 연결 */
+  /* C 재무 · 구매: 판정 구성 도넛 → 불일치 상세(판정별 거래처 · 금액) → 확인 요청 연결 */
   reconcile(t) {
     const d = t.detail;
     const total = d.verdicts.reduce((a, v) => a + v.count.value, 0);
-    const bar = stackBar(d.verdicts.map((v) => ({ name: v.name, value: v.count.value, text: fmt(v.count) })), total, '판정 구성');
-    const rows = d.verdicts.map((v) => `
-      <tr>
+    const legend = d.verdicts.map((v) => {
+      const mismatch = v.name !== '일치';
+      const inner = `
+          <span class="icon" style="background:${STATUS[v.name].color}" aria-hidden="true">${STATUS[v.name].icon}</span>
+          <span class="name">${esc(v.name)}</span><span class="count num">${esc(fmt(v.count))}</span><span class="share num">${share(v.count.value, total)}</span>
+          ${mismatch ? '<span class="go" aria-hidden="true">상세 ↓</span>' : ''}`;
+      return `<li data-verdict="${esc(v.name)}">${mismatch
+        ? `<button type="button" class="legend-link" data-target="${esc(v.name)}" aria-label="${esc(`${v.name} ${fmt(v.count)} 상세 보기`)}">${inner}</button>`
+        : `<span class="legend-link">${inner}</span>`}</li>`;
+    }).join('');
+    const donutBlock = `<div class="block donut-wrap">
+        ${donut(d.verdicts.map((v) => ({ name: v.name, value: v.count.value, text: fmt(v.count) })), total, '발주', '판정 구성')}
+        <ul class="legend legend-col">${legend}</ul>
+      </div>`;
+    const mis = d.verdicts.filter((v) => v.name !== '일치');
+    const sum = (k) => ({ value: mis.reduce((a, v) => a + v[k].value, 0), unit: mis[0][k].unit });
+    const rows = mis.map((v) => `
+      <tr data-verdict="${esc(v.name)}" tabindex="-1">
         <td data-label="판정"><span class="mark"><span class="dot" style="background:${STATUS[v.name].color}" aria-hidden="true"></span>${esc(v.name)}</span></td>
-        <td class="num" data-label="공급가액">${esc(fmt(v.supply))}</td><td class="num" data-label="계산서 금액">${esc(fmt(v.invoice))}</td><td class="num" data-label="차액">${esc(fmt(v.diff, { signed: true }))}</td>
+        <td class="num" data-label="거래처">${esc(fmt(v.vendors))}</td>
+        <td class="num" data-label="공급가액">${esc(fmt(v.supply))}</td>
+        <td class="num" data-label="계산서 금액">${esc(fmt(v.invoice))}</td>
+        <td class="num" data-label="차액">${esc(fmt(v.diff, { signed: true }))}</td>
       </tr>`).join('');
-    const table = `<div class="block"><div class="table-wrap"><table class="stack-table">
-      <thead><tr><th scope="col">판정</th><th class="num" scope="col">공급가액</th><th class="num" scope="col">계산서 금액</th><th class="num" scope="col">차액</th></tr></thead>
+    const detail = `<div class="block"><div class="table-wrap"><table class="stack-table">
+      <thead><tr><th scope="col">판정</th><th class="num" scope="col">거래처</th><th class="num" scope="col">공급가액</th><th class="num" scope="col">계산서 금액</th><th class="num" scope="col">차액</th></tr></thead>
       <tbody>${rows}</tbody>
-      <tfoot><tr><td>합계</td><td class="num" data-label="공급가액">${esc(fmt(d.total.supply))}</td><td class="num" data-label="계산서 금액">${esc(fmt(d.total.invoice))}</td><td class="num" data-label="차액">${esc(fmt(d.total.diff, { signed: true }))}</td></tr></tfoot>
-    </table></div><p class="note">차액 = 계산서 금액 − 공급가액 · 계산서 없음은 차액 계산에서 제외</p></div>`;
+      <tfoot><tr><td>불일치 합계</td><td class="num" data-label="거래처">${esc(fmt(d.mismatch_vendors))}</td><td class="num" data-label="공급가액">${esc(fmt(sum('supply')))}</td>
+        <td class="num" data-label="계산서 금액">${esc(fmt(sum('invoice')))}</td><td class="num" data-label="차액">${esc(fmt(sum('diff'), { signed: true }))}</td></tr></tfoot>
+    </table></div><p class="note">차액 = 계산서 금액 − 공급가액 · 계산서 없음은 차액 계산에서 제외 · 일치 판정은 차액 0원</p></div>`;
     const ok = d.draft_count.value === d.mismatch_vendors.value;
-    return section('판정 구성', `<div class="block">${bar}</div>`, `발주 ${esc(fmt({ value: total, unit: '건' }))} 자동 판정`)
-      + section('판정별 금액', table)
+    return `<div class="split">
+        ${section('판정 구성', donutBlock)}
+        <div id="mismatch-detail">${section('불일치 상세', detail)}</div>
+      </div>`
       + linkLine(
         `불일치 <strong class="num">${esc(fmt(d.mismatch))}</strong> · 거래처 <strong class="num">${esc(fmt(d.mismatch_vendors))}</strong>`,
         `확인 요청 초안 <strong class="num">${esc(fmt(d.draft_count))}</strong> (거래처별)`,
         ok, '불일치 거래처 전부 초안 작성', '초안 수와 불일치 거래처 수가 다릅니다 — 확인 필요');
   },
 
-  /* D 품질 · IT: 확인 순서(정렬 기준) → 조치 진행 → 불량 분포 */
+  /* D 품질 · IT: 조치 상태(숫자) → 확인 순서(정렬 기준) → 일별 불량 → 라인 × 유형 히트맵 */
   quality(t) {
     const d = t.detail;
+    const order = ['조치 완료', '조치 중', '조치 미기재'];
+    const status = [...d.status].sort((a, b) => order.indexOf(a.name) - order.indexOf(b.name)).map((s) => `
+      <li class="${s.reports.value ? '' : 'zero'}"><span class="icon" style="background:${STATUS[s.name].color}" aria-hidden="true">${STATUS[s.name].icon}</span>
+        <span class="name">${esc(s.name)}</span><strong class="num">${esc(fmt(s.reports))}</strong></li>`).join('');
+    const statusLine = `<div class="status-chips" aria-label="조치 상태">
+        <span class="label">조치 상태</span><ul>${status}</ul>
+        <span class="progress num">완료 ${esc(ratio(d.done, d.reports))}</span>
+      </div>`;
+
     const basis = d.order_basis.map((b, i) => `${i ? '<span class="gt" aria-hidden="true">›</span>' : ''}<span class="chip">${esc(b)}</span>`).join('');
     const items = d.order_groups.map((g) => `
       <li class="order-item">
         <div><p class="order-name">${esc(g.name)}</p><p class="order-count">보고 ${esc(fmt(g.reports))} · 불량 ${esc(fmt(g.qty))}</p></div>
         <div class="order-bar">${meter(g.qty.value, d.qty.value, `${g.name} · 불량 ${fmt(g.qty)} (${share(g.qty.value, d.qty.value)})`)}</div>
       </li>`).join('');
-    const order = `<div class="block">
+    const orderBlock = `<div class="block">
         <div class="order-basis"><span>정렬 기준</span>${basis}</div>
         <ol class="order-list">${items}</ol>
         <p class="note">확인 필요 보고를 살펴볼 순서입니다. 보고서의 정렬 기준을 따른 것이며, 원인이나 책임을 확정한 판정이 아닙니다.</p>
       </div>`;
-    const status = stackBar(d.status.map((s) => ({ name: s.name, value: s.reports.value, text: fmt(s.reports) })), d.reports.value, '조치 상태');
-    const max = Math.max(...d.types.map((x) => x.qty.value), ...d.lines.map((x) => x.qty.value));
-    const list = (title, rows) => `<div class="block"><p class="dist-title">${esc(title)}</p><ul class="bar-list">${rows.map((r) => `
-        <li><span>${esc(r.name)}</span>${meter(r.qty.value, max, `${r.name} · 불량 ${fmt(r.qty)} · 보고 ${fmt(r.reports)}`)}
-          <span class="val num">${esc(fmt(r.qty))} <small>${esc(fmt(r.reports))}</small></span></li>`).join('')}</ul></div>`;
-    return section('확인 순서', order, '정렬 기준 · 확정 판정 아님')
-      + section('조치 진행', `<div class="block">${status}</div>`, `조치 완료 ${esc(fmt(d.done))} / 보고 ${esc(fmt(d.reports))}`)
-      + section('불량 분포', `<div class="dist-grid">${list('유형별 불량 수량', d.types)}${list('라인별 불량 수량', d.lines)}</div>`, '막대: 불량 수량(개) · 작은 글씨: 보고 건수');
+
+    const maxDay = Math.max(...d.daily.map((x) => x.qty.value));
+    const cols = d.daily.map((x) => `
+      <li><span class="col-val num">${esc(fmt(x.qty))}</span>
+        <span class="col-track"><span class="col-bar" style="height:${(x.qty.value / maxDay) * 100}%" data-tip="<strong>${esc(x.date)}</strong>불량 ${esc(fmt(x.qty))} · 보고 ${esc(fmt(x.reports))}"></span></span>
+        <span class="col-date num">${esc(x.date)}</span><span class="col-sub num">${esc(fmt(x.reports))}</span></li>`).join('');
+    const daily = `<div class="block"><ol class="cols" role="img" aria-label="${esc(`일별 불량 수량: ${d.daily.map((x) => `${x.date} ${fmt(x.qty)}`).join(', ')}`)}">${cols}</ol></div>`;
+
+    const types = d.types.map((x) => x.name);
+    const maxCell = Math.max(...d.matrix.map((m) => m.qty.value));
+    const cell = (l, ty) => d.matrix.find((m) => m.line === l && m.type === ty);
+    const total = (q, r) => `<td class="heat-total num"><strong>${esc(fmt(q))}</strong><span class="heat-sub">${esc(fmt(r))}</span></td>`;
+    const rows = d.lines.map((l) => `
+      <tr><th scope="row">${esc(l.name)}</th>
+        ${types.map((ty) => {
+          const m = cell(l.name, ty);
+          return m ? heatCell(m.qty.value / maxCell, `<strong class="num">${esc(fmt(m.qty))}</strong><span class="heat-sub num">${esc(fmt(m.reports))}</span>`,
+            `${l.name} · ${ty} · 불량 ${fmt(m.qty)} · 보고 ${fmt(m.reports)}`) : '<td class="heat-empty">–<span class="sr-only">없음</span></td>';
+        }).join('')}
+        ${total(l.qty, l.reports)}
+      </tr>`).join('');
+    const foot = d.types.map((x) => total(x.qty, x.reports)).join('');
+    const matrix = `<div class="block"><div class="table-wrap"><table class="heatmap">
+        <thead><tr><th scope="col">라인</th>${types.map((ty) => `<th scope="col">${esc(ty)}</th>`).join('')}<th scope="col">합계</th></tr></thead>
+        <tbody>${rows}</tbody>
+        <tfoot><tr><th scope="row">합계</th>${foot}${total(d.qty, d.reports)}</tr></tfoot>
+      </table></div>${heatLegend('적음', '많음', '불량 수량')}</div>`;
+
+    return statusLine
+      + section('확인 순서', orderBlock, '정렬 기준 · 확정 판정 아님')
+      + section('일별 불량 수량', daily, '막대: 불량 수량(개) · 아래: 보고 건수')
+      + section('라인 × 유형 불량 수량', matrix, '칸: 불량 수량(개) · 아래: 보고 건수');
   },
 };
 
@@ -298,6 +396,7 @@ function route(focus) {
   const active = $(`.gnb-link[data-route="${current}"]`);
   if (active) active.scrollIntoView({ block: 'nearest', inline: 'nearest' });
   $('#view').innerHTML = t ? renderTrack(t) : renderOverview();
+  if (t && t.view === 'reconcile') linkVerdicts($('#view'));
   $('#footer').innerHTML = renderFooter(t);
   document.title = `${t ? `${t.id} ${t.name} · ` : ''}실습 결과 대시보드${isDemo() ? ' (데모)' : ''}`;
   if (focus) {

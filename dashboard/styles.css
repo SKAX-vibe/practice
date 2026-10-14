@@ -144,27 +144,71 @@ tfoot td { font-weight: 700; border-bottom: 0; border-top: 2px solid var(--ink);
 .course-name { font-size: 16px; font-weight: 700; }
 .course-rate { font-size: 40px; font-weight: 700; line-height: 1.2; margin: 8px 0 16px; }
 .course-sub { font-size: 14px; color: var(--muted); margin-top: 12px; }
-.matrix td .cell { display: grid; gap: 6px; min-width: 96px; }
-.matrix td .cell-top { display: flex; justify-content: space-between; gap: 8px; }
-.matrix td .cell-sub { font-size: 14px; color: var(--muted); }
 
 /* 연결 표시 (지연 → 독려, 불일치 → 확인 요청) */
 .link-line { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; margin-top: 24px; padding: 20px var(--inset); border: 1px solid var(--border); border-radius: var(--radius); }
 .link-line .arrow { color: var(--muted); }
 .link-line .ok { margin-left: auto; font-size: 14px; font-weight: 700; }
 
-/* ---------- C · D: 구성 막대 ---------- */
-.stack { display: flex; gap: 2px; height: 32px; }
-.stack-seg { min-width: 4px; }
-.stack-seg:first-child { border-radius: 4px 0 0 4px; }
-.stack-seg:last-child { border-radius: 0 4px 4px 0; }
-.legend { display: flex; flex-wrap: wrap; gap: 12px 32px; margin-top: 20px; list-style: none; padding: 0; }
-.legend li { display: flex; align-items: baseline; gap: 8px; }
-.legend .icon { width: 18px; height: 18px; border-radius: 50%; color: #fff; font-size: 12px; font-weight: 700; display: inline-grid; place-items: center; flex: none; transform: translateY(3px); }
-.legend .name { font-size: 14px; color: var(--muted); }
-.legend .count { font-size: 24px; font-weight: 700; }
-.legend .share { font-size: 14px; color: var(--muted); }
-.diff-pos::before { content: "+"; }
+/* ---------- 히트맵 (B 부서 × 과정, D 라인 × 유형) ---------- */
+.heatmap { border-collapse: separate; border-spacing: 2px; }
+.heatmap th, .heatmap td { border: 0; padding: 12px; }
+.heatmap thead th { white-space: normal; vertical-align: bottom; }
+.heatmap tbody th, .heatmap tfoot th { font-size: 16px; font-weight: 700; color: var(--ink); white-space: nowrap; }
+.heatmap td.heat { border-radius: 4px; text-align: center; min-width: 88px; }
+.heatmap td strong, .heatmap td .heat-sub { display: block; }
+.heat-sub { display: block; font-size: 13px; font-weight: 400; }
+.heatmap th .heat-sub { color: var(--muted); }
+.heatmap td.heat-empty { text-align: center; color: var(--muted); background: var(--canvas); border-radius: 4px; }
+.heatmap td.heat-total { text-align: center; }
+.heatmap tfoot th, .heatmap tfoot td { border-top: 2px solid var(--ink); }
+.heat-legend { display: flex; align-items: center; gap: 8px; margin-top: 16px; font-size: 13px; color: var(--muted); }
+.heat-ramp { width: 120px; height: 8px; border-radius: 4px; background: linear-gradient(90deg, hsl(0 0% 96%), hsl(0 0% 26%)); border: 1px solid var(--border); }
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+
+/* ---------- C: 도넛 + 불일치 상세 ---------- */
+.split { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); gap: 24px; align-items: start; }
+.donut-wrap { display: flex; align-items: center; gap: 32px; }
+.donut { width: 180px; height: 180px; flex: none; }
+.donut-seg { transition: stroke-width .15s; }
+.donut-seg.is-hl { stroke-width: 28; }
+.donut-total { font-size: 28px; font-weight: 700; fill: var(--ink); font-family: var(--font); }
+.donut-label { font-size: 14px; fill: var(--muted); font-family: var(--font); }
+.legend { list-style: none; margin: 0; padding: 0; }
+.legend .icon { width: 18px; height: 18px; border-radius: 50%; color: #fff; font-size: 12px; font-weight: 700; display: inline-grid; place-items: center; flex: none; }
+.legend-col { display: grid; gap: 4px; flex: 1 1 auto; min-width: 0; }
+.legend-link {
+  display: grid; grid-template-columns: 18px minmax(0, 1fr) auto auto; align-items: center; column-gap: 8px; width: 100%;
+  padding: 8px 0; border: 0; border-bottom: 1px solid var(--border); background: transparent; font: inherit; color: inherit; text-align: left;
+}
+button.legend-link { cursor: pointer; }
+.legend-link .name { font-size: 14px; color: var(--muted); }
+.legend-link .count { font-size: 20px; font-weight: 700; }
+.legend-link .share { font-size: 13px; color: var(--muted); min-width: 44px; text-align: right; }
+.legend-link .go { grid-column: 2 / -1; font-size: 13px; font-weight: 700; text-decoration: underline; text-underline-offset: 3px; }
+.legend-col li.is-hl .legend-link .name { color: var(--ink); }
+#mismatch-detail tr.is-hl td { background: var(--canvas); }
+#mismatch-detail tr:focus-visible { outline: 2px dotted var(--ink); outline-offset: 0; }
+
+/* ---------- D: 조치 상태 숫자 ---------- */
+.status-chips { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 24px; margin-top: 24px; padding: 16px var(--inset); border: 1px solid var(--border); border-radius: var(--radius); }
+.status-chips .label { font-size: 14px; font-weight: 700; }
+.status-chips ul { display: flex; flex-wrap: wrap; gap: 8px 24px; list-style: none; margin: 0; padding: 0; }
+.status-chips li { display: flex; align-items: center; gap: 8px; font-size: 14px; }
+.status-chips li strong { font-size: 18px; }
+.status-chips li.zero strong { color: var(--muted); }
+.status-chips .icon { width: 18px; height: 18px; border-radius: 50%; color: #fff; font-size: 12px; font-weight: 700; display: inline-grid; place-items: center; }
+.status-chips .name { color: var(--muted); }
+.status-chips .progress { margin-left: auto; font-size: 14px; font-weight: 700; }
+
+/* ---------- D: 일별 세로 막대 ---------- */
+.cols { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); gap: 12px; list-style: none; margin: 0; padding: 0; }
+.cols li { display: grid; grid-template-rows: auto 160px auto auto; justify-items: center; gap: 6px; min-width: 0; }
+.col-val { font-size: 14px; font-weight: 700; white-space: nowrap; }
+.col-track { display: flex; align-items: flex-end; justify-content: center; width: 100%; border-bottom: 1px solid var(--ink); }
+.col-bar { display: block; width: min(48px, 70%); background: var(--ink); border-radius: 4px 4px 0 0; min-height: 2px; }
+.col-date { font-size: 14px; white-space: nowrap; }
+.col-sub { font-size: 13px; color: var(--muted); white-space: nowrap; }
 
 /* ---------- D: 확인 순서 ---------- */
 .order-basis { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 14px; margin-bottom: 24px; }
@@ -176,13 +220,6 @@ tfoot td { font-weight: 700; border-bottom: 0; border-top: 2px solid var(--ink);
 .order-item::before { content: counter(ord); width: 32px; height: 32px; border-radius: 50%; background: var(--ink); color: var(--canvas); font-size: 14px; font-weight: 700; display: grid; place-items: center; }
 .order-name { font-size: 18px; font-weight: 700; }
 .order-count { font-size: 14px; color: var(--muted); }
-
-.dist-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 24px; }
-.dist-title { font-size: 16px; font-weight: 700; margin-bottom: 16px; }
-.bar-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 14px; }
-.bar-list li { display: grid; grid-template-columns: 96px minmax(0, 1fr) 96px; align-items: center; gap: 12px; font-size: 14px; }
-.bar-list .val { text-align: right; font-weight: 700; }
-.bar-list .val small { font-weight: 400; color: var(--muted); font-size: 14px; }
 
 /* ---------- Verification line & pager ---------- */
 .verify-line { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 20px; margin-top: 48px; padding-top: 24px; border-top: 1px solid var(--border); font-size: 14px; }
@@ -212,7 +249,7 @@ tfoot td { font-weight: 700; border-bottom: 0; border-top: 2px solid var(--ink);
 
 /* ---------- Responsive ---------- */
 @media (max-width: 900px) {
-  .track-grid { grid-template-columns: minmax(0, 1fr); }
+  .track-grid, .split { grid-template-columns: minmax(0, 1fr); }
 }
 @media (max-width: 720px) {
   :root { --inset: 20px; --page-pad: 16px; }
@@ -230,7 +267,6 @@ tfoot td { font-weight: 700; border-bottom: 0; border-top: 2px solid var(--ink);
   .flow-step + .flow-step { border-left: 0; border-top: 1px solid var(--border); }
   .flow-step + .flow-step::before { content: "↓"; left: var(--inset); top: -12px; }
 
-  .course-grid, .dist-grid { grid-template-columns: minmax(0, 1fr); }
   .course-rate { font-size: 32px; }
   .facts { grid-template-columns: 80px minmax(0, 1fr); }
 
@@ -247,19 +283,25 @@ tfoot td { font-weight: 700; border-bottom: 0; border-top: 2px solid var(--ink);
   .stack-table .inline-bar { min-width: 0; flex: 1 1 auto; justify-content: flex-end; }
   .stack-table .inline-bar .meter { max-width: 120px; }
 
-  .matrix th, .matrix td { padding-left: 6px; padding-right: 6px; }
-  .matrix th:first-child, .matrix td:first-child { padding-left: 0; }
-  .matrix td .cell { min-width: 0; }
-  .matrix td .cell-top { flex-direction: column; gap: 0; }
+  .course-grid { grid-template-columns: minmax(0, 1fr); }
+  .heatmap th, .heatmap td { padding: 10px 6px; }
+  .heatmap th:first-child { padding-left: 0; }
+  .heatmap td.heat { min-width: 0; }
+  .heatmap thead th { font-size: 13px; }
+  .heatmap tbody th, .heatmap tfoot th { font-size: 14px; white-space: normal; }
+  .donut-wrap { flex-direction: column; align-items: stretch; gap: 16px; }
+  .donut { align-self: center; width: 160px; height: 160px; }
+  .status-chips .progress { margin-left: 0; width: 100%; }
+  .cols { gap: 6px; }
+  .cols li { grid-template-rows: auto 120px auto auto; }
+  .col-val, .col-date { font-size: 13px; }
   .order-item { grid-template-columns: 40px minmax(0, 1fr); }
   .order-item .order-bar { grid-column: 2; }
-  .bar-list li { grid-template-columns: 72px minmax(0, 1fr) 88px; }
   .link-line .ok { margin-left: 0; width: 100%; }
-  .legend { gap: 12px 24px; }
 }
 @media (forced-colors: active) {
-  .meter-fill, .stack-seg, .dot, .legend .icon { forced-color-adjust: none; border: 1px solid CanvasText; }
+  .meter-fill, .col-bar, .dot, .legend .icon, .status-chips .icon, .heatmap td.heat { forced-color-adjust: none; border: 1px solid CanvasText; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .btn-outline { transition: none; }
+  .btn-outline, .donut-seg { transition: none; }
 }
