@@ -345,10 +345,12 @@ def track_d():
 
 def build():
     tracks = []
+    components = collect_components(REPO)
     for fn in (track_a, track_b, track_c, track_d):
         t = fn()
         t["verify"] = verify_summary(t["key"])
         t["sources"].append(f"{t['key']}/report/검증결과.md")
+        t["components"] = components[t["key"]]
         tracks.append(t)
     return {
         "schema": 2,
@@ -357,7 +359,6 @@ def build():
         "notice": "내부 확인용 · 각 트랙 report/ 결과물의 집계이며 외부 공개용이 아닙니다.",
         "min_group": MIN_GROUP,
         "tracks": tracks,
-        "components": collect_components(REPO),
     }
 
 

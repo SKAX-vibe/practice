@@ -240,18 +240,18 @@ button.legend-link { cursor: pointer; }
 .btn-outline:focus-visible { outline-offset: 0; }
 .pager .next { margin-left: auto; }
 
-/* ---------- 개요 하단: 자동화 구성 요소 ---------- */
-.comp-grid { column-count: 2; column-gap: 24px; }
-.comp-group { padding: var(--inset); background: var(--surface); border-radius: var(--radius); break-inside: avoid; margin-bottom: 24px; }
-.comp-kind { font-size: 18px; font-weight: 700; margin: 0 0 8px; }
-.comp-count { font-size: 14px; font-weight: 400; color: var(--muted); margin-left: 4px; }
+/* ---------- 업무 페이지 하단: 자동화 구성 요소 ---------- */
 .comp-list { list-style: none; margin: 0; padding: 0; }
-.comp-list li { padding: 14px 0; border-top: 1px solid var(--border); }
-.comp-list li:first-child { border-top: 0; }
-.comp-head { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 4px 12px; }
-.comp-name { font-size: 16px; font-weight: 700; overflow-wrap: anywhere; }
-.comp-where { font-size: 13px; color: var(--muted); white-space: nowrap; }
-.comp-desc { font-size: 14px; color: var(--muted); margin-top: 4px; }
+.comp-row { display: grid; grid-template-columns: 88px minmax(0, 1fr); gap: 16px; padding: 16px 0; border-top: 1px solid var(--border); }
+.comp-row:first-child { border-top: 0; padding-top: 0; }
+.comp-row:last-child { padding-bottom: 0; }
+.comp-kind { font-size: 14px; font-weight: 700; color: var(--muted); padding-top: 2px; }
+.comp-line { font-size: 16px; }
+.comp-name { font-weight: 700; overflow-wrap: anywhere; }
+.comp-sep { color: var(--muted); }
+.comp-desc { color: var(--ink); }
+.comp-path { margin-top: 4px; font-size: 13px; color: var(--muted); overflow-wrap: anywhere; }
+.comp-path code { font-size: 13px; }
 
 /* ---------- Footer & tooltip ---------- */
 .site-footer { border-top: 1px solid var(--border); background: var(--surface); }
@@ -263,7 +263,6 @@ button.legend-link { cursor: pointer; }
 /* ---------- Responsive ---------- */
 @media (max-width: 900px) {
   .track-grid, .split { grid-template-columns: minmax(0, 1fr); }
-  .comp-grid { column-count: 1; }
 }
 @media (max-width: 720px) {
   :root { --inset: 20px; --page-pad: 16px; }
@@ -310,6 +309,10 @@ button.legend-link { cursor: pointer; }
   .cols li { grid-template-rows: auto 120px auto auto; }
   .col-val, .col-date { font-size: 13px; }
   .order-item { grid-template-columns: 40px minmax(0, 1fr); }
+  .comp-row { grid-template-columns: minmax(0, 1fr); gap: 4px; }
+  .comp-kind { padding-top: 0; }
+  .comp-sep { display: none; }
+  .comp-desc { display: block; margin-top: 2px; }
   .order-item .order-bar { grid-column: 2; }
   .link-line .ok { margin-left: 0; width: 100%; }
 }

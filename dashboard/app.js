@@ -351,34 +351,22 @@ function renderOverview() {
     <h1 class="page-title">업무 자동화 실습 결과</h1>
     <p class="page-lead">4개 업무에서 자동화가 처리한 일과, 사람이 판단해야 할 일을 정리했습니다.</p>
     ${status}
-    <div class="track-grid">${cards}</div>
-    ${renderComponents()}`;
+    <div class="track-grid">${cards}</div>`;
 }
 
-/** 개요 하단: 저장소에 실제로 있는 커맨드 · Skill · 도구 · 기억 파일 (구분 · 항목 · 담당 업무 · 설명) */
-function renderComponents() {
-  const items = DATA.components || [];
+/** 업무 페이지 하단: 이 업무 폴더에 실제로 있는 도구 · Skill · 커맨드 · Memory (구분 : 항목 — 역할, 실제 경로) */
+function renderComponents(t) {
+  const items = t.components || [];
   if (!items.length) return '';
-  const label = Object.fromEntries(DATA.tracks.map((t) => [t.key, `${t.id} ${t.name}`]));
-  const where = (keys) => (keys.length === DATA.tracks.length ? '4개 업무 공통' : keys.map((k) => label[k] || k).join(' · '));
-  const kinds = [...new Set(items.map((i) => i.kind))];
-  const groups = kinds.map((kind) => {
-    const list = items.filter((i) => i.kind === kind);
-    return `<section class="comp-group" aria-labelledby="comp-${esc(kind)}">
-      <h3 class="comp-kind" id="comp-${esc(kind)}">${esc(kind)} <span class="comp-count">${list.length}</span></h3>
-      <ul class="comp-list">${list.map((i) => `
-        <li>
-          <p class="comp-head"><span class="comp-name">${esc(i.name)}</span><span class="comp-where">${esc(where(i.tracks))}</span></p>
-          <p class="comp-desc">${esc(i.desc)}</p>
-        </li>`).join('')}
-      </ul>
-    </section>`;
-  }).join('');
-  return `<section class="section components" aria-labelledby="comp-title">
-    <div class="section-head"><h2 class="section-title" id="comp-title">자동화 구성 요소</h2>
-      <p class="section-note">각 업무 폴더에 있는 도구 · Skill · 커맨드 · Memory</p></div>
-    <div class="comp-grid">${groups}</div>
-  </section>`;
+  const rows = items.map((c) => `
+      <li class="comp-row">
+        <span class="comp-kind">${esc(c.kind)}</span>
+        <div class="comp-body">
+          <p class="comp-line"><strong class="comp-name">${esc(c.name)}</strong><span class="comp-sep" aria-hidden="true"> — </span><span class="comp-desc">${esc(c.desc)}</span></p>
+          <p class="comp-path"><code>${esc(c.path)}</code></p>
+        </div>
+      </li>`).join('');
+  return section('자동화 구성 요소', `<div class="block"><ul class="comp-list">${rows}</ul></div>`);
 }
 
 function renderTrack(t) {
@@ -393,6 +381,7 @@ function renderTrack(t) {
     ${flowStrip(t.flow)}
     ${VIEWS[t.view](t)}
     ${verifyLine(t.verify)}
+    ${renderComponents(t)}
     <nav class="pager" aria-label="트랙 이동">
       ${prev ? `<a class="btn-outline" href="#${esc(prev.id)}">← ${esc(prev.id)} ${esc(prev.name)}</a>` : '<a class="btn-outline" href="#overview">← 개요</a>'}
       ${next ? `<a class="btn-outline next" href="#${esc(next.id)}">${esc(next.id)} ${esc(next.name)} →</a>` : '<a class="btn-outline next" href="#overview">개요 →</a>'}

@@ -1,7 +1,8 @@
-"""대시보드 하단 '자동화 구성 요소' 목록.
+"""업무(트랙)별 '자동화 구성 요소' 목록.
 
-각 트랙 폴더의 커맨드 · Skill · 도구 · 기억 파일 중 **실제로 존재하는 것만** 목록에 넣는다.
-설명은 아래 CATALOG에 짧게 적는다(파일 내용 · 경로 · 실행 명령은 넣지 않음).
+각 트랙 폴더의 커맨드 · Skill · 도구 · 기억 파일 중 **실제로 존재하는 것만** 그 트랙 페이지에 넣는다.
+설명은 아래 CATALOG에 짧게 적는다(파일 내용 · 실행 명령은 넣지 않음).
+여러 트랙에 같은 이름의 파일이 있으면(verify.py) 트랙별 실제 경로와 그 파일이 검증하는 대상을 따로 적는다.
 트랙 폴더에 CATALOG에 없는 커맨드 · Skill · 도구 · 기억 파일이 새로 생기면 오류를 낸다(누락 방지).
 """
 
@@ -9,12 +10,19 @@ from pathlib import Path
 
 TRACK_KEYS = ["sales-quote", "hr-training", "fin-invoice", "ops-quality"]
 
-# (구분, 표시 이름, 트랙 폴더 기준 상대 경로, 설명)
+# 트랙별 verify.py 역할: 각 파일 docstring 첫 줄의 검증 대상을 옮긴 것
+VERIFY_DESC = {
+    "sales-quote": "회신 초안과 견적 처리 현황을 문의 원문 · 단가표와 대조해 PASS/FAIL로 검증",
+    "hr-training": "교육 이수 현황과 독려 초안을 원본 자료와 대조해 PASS/FAIL로 검증",
+    "fin-invoice": "대조표 · 대조 요약 · 확인 요청 초안을 원본 자료와 대조해 PASS/FAIL로 검증",
+    "ops-quality": "주간 품질 보고서를 불량 보고 원본과 대조해 PASS/FAIL로 검증",
+}
+
+# (구분, 표시 이름, 트랙 폴더 기준 상대 경로, 설명 — 문자열 또는 트랙별 dict)
 CATALOG = [
     ("도구", "price_lookup.py", "tools/price_lookup.py",
      "품목명과 단위를 기준으로 단가표를 조회하고 불일치 항목을 확인 필요로 분류"),
-    ("도구", "verify.py", "scripts/verify.py",
-     "원본 자료와 보고서 · 초안을 대조해 집계와 판정이 맞는지 PASS/FAIL로 검증"),
+    ("도구", "verify.py", "scripts/verify.py", VERIFY_DESC),
     ("Skill", "quote-reply", ".claude/skills/quote-reply/SKILL.md",
      "회신 초안이 없는 견적 문의를 찾아 초안과 처리 현황을 작성하고 검증 결과를 남김"),
     ("Skill", "reply-rules", ".claude/skills/reply-rules/SKILL.md",
@@ -49,6 +57,7 @@ def _existing_files(track_dir):
 
 
 def collect(repo):
+    """{트랙 키: [{kind, name, path, desc}, ...]} — 트랙 폴더에 실제로 있는 항목만."""
     repo = Path(repo)
     cataloged = {rel for _, _, rel, _ in CATALOG}
     unknown = []
@@ -57,10 +66,14 @@ def collect(repo):
     if unknown:
         raise ValueError(f"구성 요소 목록(CATALOG)에 없는 파일이 있습니다: {unknown}")
 
-    items = []
-    for kind, name, rel, desc in CATALOG:
-        tracks = [key for key in TRACK_KEYS if (repo / key / rel).is_file()]
-        if tracks:  # 실제로 존재하는 항목만
-            items.append({"kind": kind, "name": name, "tracks": tracks, "desc": desc})
-    items.sort(key=lambda x: KIND_ORDER.index(x["kind"]))
-    return items
+    result = {}
+    for key in TRACK_KEYS:
+        items = []
+        for kind, name, rel, desc in CATALOG:
+            if not (repo / key / rel).is_file():
+                continue
+            text = desc[key] if isinstance(desc, dict) else desc
+            items.append({"kind": kind, "name": name, "path": f"{key}/{rel}", "desc": text})
+        items.sort(key=lambda x: KIND_ORDER.index(x["kind"]))
+        result[key] = items
+    return result
