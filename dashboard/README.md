@@ -13,6 +13,8 @@ HTML · CSS · JavaScript만 사용하며, DB · 백엔드가 없다.
 | C 재무 · 구매 | `#C` | 자동 대조 결과와 어긋난 곳 | 판정 구성 · 판정별 금액 · 불일치 → 확인 요청 연결 |
 | D 품질 · IT | `#D` | 어떤 보고부터 확인하고 조치는 얼마나 진행됐나 | 확인 순서(정렬 기준, 확정 판정 아님) · 조치 진행 · 불량 분포 |
 
+개요 하단 "자동화 구성 요소"는 각 업무 폴더에 실제로 있는 도구 · Skill · 커맨드 · Memory 목록이다(`tools/components.py`). 파일이 없으면 표시하지 않고, 목록에 없는 새 파일이 생기면 데이터 생성이 실패한다.
+
 디자인 기준: `design/design.md` (레이아웃 · 타이포그래피 · 여백 · 정보 위계 참고, 브랜드 요소 미사용, 밝은 테마만).
 데이터 구조는 `schema: 2`이며 모든 수치는 `{value, unit}`(건 · 명 · 개 · 원 · % · 항목 · 곳)로 단위를 함께 담는다.
 
@@ -35,7 +37,7 @@ HTML · CSS · JavaScript만 사용하며, DB · 백엔드가 없다.
 | `index.html`, `styles.css`, `app.js` | O | 화면 |
 | `data/demo.json` | O (사이트에는 `data/dashboard.json` 이름으로 올라감) | 공개용 데모 데이터 |
 | `data/dashboard.json` | X | 내부 실습 결과 집계 |
-| `tools/build_data.py`, `tools/build_demo.py` | X | 데이터 생성 |
+| `tools/build_data.py`, `tools/build_demo.py`, `tools/components.py` | X | 데이터 생성 · 구성 요소 목록 |
 | `tools/check_public.py` | X | 공개 파일 노출 점검 |
 
 배포 워크플로: `.github/workflows/pages.yml`

@@ -852,5 +852,114 @@
       },
       "sources": []
     }
+  ],
+  "components": [
+    {
+      "kind": "도구",
+      "name": "price_lookup.py",
+      "tracks": [
+        "sales-quote"
+      ],
+      "desc": "품목명과 단위를 기준으로 단가표를 조회하고 불일치 항목을 확인 필요로 분류"
+    },
+    {
+      "kind": "도구",
+      "name": "verify.py",
+      "tracks": [
+        "sales-quote",
+        "hr-training",
+        "fin-invoice",
+        "ops-quality"
+      ],
+      "desc": "원본 자료와 보고서 · 초안을 대조해 집계와 판정이 맞는지 PASS/FAIL로 검증"
+    },
+    {
+      "kind": "Skill",
+      "name": "quote-reply",
+      "tracks": [
+        "sales-quote"
+      ],
+      "desc": "회신 초안이 없는 견적 문의를 찾아 초안과 처리 현황을 작성하고 검증 결과를 남김"
+    },
+    {
+      "kind": "Skill",
+      "name": "reply-rules",
+      "tracks": [
+        "sales-quote"
+      ],
+      "desc": "견적 회신 초안의 문구 규칙과 사용하지 않는 표현 관리"
+    },
+    {
+      "kind": "Skill",
+      "name": "training-nudge",
+      "tracks": [
+        "hr-training"
+      ],
+      "desc": "교육 이수 현황을 정리하고 기한이 지난 미이수자에게 보낼 독려 초안을 작성한 뒤 검증"
+    },
+    {
+      "kind": "Skill",
+      "name": "invoice-check",
+      "tracks": [
+        "fin-invoice"
+      ],
+      "desc": "발주와 세금계산서를 대조하고 불일치 거래처별 확인 요청 초안을 작성한 뒤 검증"
+    },
+    {
+      "kind": "Skill",
+      "name": "quality-weekly",
+      "tracks": [
+        "ops-quality"
+      ],
+      "desc": "주간 품질 보고서를 만들고 반복 · 미조치 분석과 조치 요청 초안까지 작성"
+    },
+    {
+      "kind": "커맨드",
+      "name": "/quote",
+      "tracks": [
+        "sales-quote"
+      ],
+      "desc": "견적 문의를 단가표와 대조해 회신 초안을 작성하고 검증"
+    },
+    {
+      "kind": "커맨드",
+      "name": "/training",
+      "tracks": [
+        "hr-training"
+      ],
+      "desc": "명단과 수료 기록을 대조해 부서별 이수율과 미이수자 목록을 작성하고 검증"
+    },
+    {
+      "kind": "커맨드",
+      "name": "/match",
+      "tracks": [
+        "fin-invoice"
+      ],
+      "desc": "발주와 세금계산서를 대조해 대조표와 차이 목록을 작성하고 검증"
+    },
+    {
+      "kind": "커맨드",
+      "name": "/weekly",
+      "tracks": [
+        "ops-quality"
+      ],
+      "desc": "불량 보고를 유형별로 집계해 주간 품질 보고서를 작성하고 검증"
+    },
+    {
+      "kind": "커맨드",
+      "name": "/quality-check",
+      "tracks": [
+        "ops-quality"
+      ],
+      "desc": "보고서를 고치지 않고 원본과 대조해 검증만 수행"
+    },
+    {
+      "kind": "Memory",
+      "name": "견적업무기억.md",
+      "tracks": [
+        "sales-quote"
+      ],
+      "desc": "거래처 문의 이력과 업무상 확인 사항을 날짜 및 출처와 함께 기록"
+    }
   ]
 }

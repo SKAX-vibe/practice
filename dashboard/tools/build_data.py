@@ -10,11 +10,15 @@
 """
 
 import argparse
+import sys
 import csv
 import io
 import json
 import re
 from pathlib import Path
+
+sys.dont_write_bytecode = True  # 저장소에 __pycache__ 를 남기지 않는다
+from components import collect as collect_components  # noqa: E402
 
 REPO = Path(__file__).resolve().parents[2]
 DEFAULT_OUT = REPO / "dashboard" / "data" / "dashboard.json"
@@ -353,6 +357,7 @@ def build():
         "notice": "내부 확인용 · 각 트랙 report/ 결과물의 집계이며 외부 공개용이 아닙니다.",
         "min_group": MIN_GROUP,
         "tracks": tracks,
+        "components": collect_components(REPO),
     }
 
 

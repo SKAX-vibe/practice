@@ -5,6 +5,8 @@ GitHub Pages에는 실제 실습 결과 대신 이 데모 데이터를 올린다
 거래처 · 부서 · 과정 · 유형 명칭도 실제 자료와 겹치지 않는 예시 명칭만 쓴다.
 검증 결과는 수치 없이 '예시'로만 표시한다 (final: DEMO).
 구조는 build_data.py 가 만드는 data/dashboard.json 과 같다.
+하단 '자동화 구성 요소'(components)는 데모 값이 아니라 저장소에 실제로 있는 커맨드 · Skill · 도구 · 기억 파일 목록이다
+(tools/components.py, 파일 존재 여부만 확인하며 업무 자료는 읽지 않음).
 
 사용법 (저장소 최상위 폴더에서):
     python dashboard/tools/build_demo.py            # dashboard/data/demo.json 생성
@@ -12,8 +14,12 @@ GitHub Pages에는 실제 실습 결과 대신 이 데모 데이터를 올린다
 """
 
 import argparse
+import sys
 import json
 from pathlib import Path
+
+sys.dont_write_bytecode = True  # 저장소에 __pycache__ 를 남기지 않는다
+from components import collect as collect_components  # noqa: E402
 
 REPO = Path(__file__).resolve().parents[2]
 DEFAULT_OUT = REPO / "dashboard" / "data" / "demo.json"
@@ -172,6 +178,7 @@ def build():
         "mode": "demo",
         "notice": "공개 데모입니다. 수치와 거래처 · 부서 · 과정 · 유형 명칭은 화면 구성을 보여주기 위한 가상의 예시이며, 검증 결과도 예시로만 표시합니다.",
         "tracks": tracks,
+        "components": collect_components(REPO),
     }
 
 
